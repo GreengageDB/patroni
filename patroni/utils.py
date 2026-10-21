@@ -1248,7 +1248,7 @@ def get_postgres_version(bin_dir: Optional[str] = None, bin_name: str = 'postgre
         version = subprocess.check_output([binary, '--version']).decode()
     except OSError as e:
         raise PatroniException(f'Failed to get postgres version: {e}')
-    version = re.match(r'^[^\s]+ [^\s]+ ((\d+)(\.\d+)*)', version)
+    version = re.match(r'^[^\s]+ \(Greengage Database\) ((\d+)(\.\d+)*)', version)
     if TYPE_CHECKING:  # pragma: no cover
         assert version is not None
     version = version.groups()  # e.g., ('15.2', '15', '.2')

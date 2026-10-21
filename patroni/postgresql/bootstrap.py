@@ -283,6 +283,7 @@ class Bootstrap(object):
             "-X",
             "stream",
             "--dbname=" + conn_url,
+            "--target-gp-dbid=42",
         ] + user_options
 
         for bbfailures in range(0, maxfailures):
