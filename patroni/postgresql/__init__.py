@@ -95,6 +95,7 @@ class Postgresql(ClusterSite):
 
         self._pending_restart_reason = CaseInsensitiveDict()
         self.connection_pool = ConnectionPool()
+        self.connection_pool.conn_kwargs = {'gp_role': 'utility'}
         self._connection = self.connection_pool.get('heartbeat')
         self.mpp_handler = mpp.get_handler_impl(self)
         self._bin_dir = config.get('bin_dir') or ''
