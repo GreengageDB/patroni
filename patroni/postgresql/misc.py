@@ -3,7 +3,7 @@ import logging
 import os
 
 from enum import Enum
-from typing import Iterable, Tuple
+from typing import Iterable, Optional, Tuple
 
 from ..exceptions import PostgresException
 
@@ -148,6 +148,25 @@ def parse_history(data: str) -> Iterable[Tuple[int, int, str]]:
                 yield int(values[0]), parse_lsn(values[1]), values[2]
             except (IndexError, ValueError):
                 logger.exception('Exception when parsing timeline history line "%s"', values)
+
+
+def merge_options(*options: Optional[str]) -> str:
+    """Combine values of the libpq ``options`` connection parameter.
+
+    .. note::
+        Postgres applies ``-c`` settings from left to right, therefore the last value wins. It allows the user
+        supplied ``options`` (which are expected to be the last argument) to override Patroni's own settings.
+
+    :param options: values to combine. Empty values and ``None`` are skipped.
+
+    :returns: a value for the libpq ``options`` connection parameter, possibly an empty string.
+
+    :Example:
+
+        >>> merge_options('-c statement_timeout=2000', None, '-c gp_role=utility')
+        '-c statement_timeout=2000 -c gp_role=utility'
+    """
+    return ' '.join(option.strip() for option in options if option and option.strip())
 
 
 def format_lsn(lsn: int, full: bool = False) -> str:

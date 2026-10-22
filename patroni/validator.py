@@ -984,7 +984,7 @@ def validate_name(value: Any) -> None:
         raise ConfigParseError(f"Node 'name' can't be set to '{SYNC_STRICT_PLACEHOLDER}'")
 
 
-userattributes = {"username": "", Optional("password"): ""}
+userattributes = {"username": "", Optional("password"): "", Optional("options"): ""}
 available_dcs = [m.split(".")[-1] for m in dcs_modules()]
 setattr(validate_host_port_list, 'expected_type', list)
 setattr(comma_separated_host_port, 'expected_type', str)

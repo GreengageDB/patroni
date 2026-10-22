@@ -20,7 +20,8 @@ from ..psycopg import parse_conninfo
 from ..utils import compare_values, get_postgres_version, is_subpath, \
     maybe_convert_from_base_unit, parse_bool, parse_int, split_host_port, uri, validate_directory
 from ..validator import EnumValidator, IntValidator
-from .misc import get_major_from_minor_version, postgres_version_to_int, PostgresqlRole, PostgresqlState
+from .misc import get_major_from_minor_version, merge_options, postgres_version_to_int, \
+    PostgresqlRole, PostgresqlState
 from .sync import SYNC_STRICT_PLACEHOLDER
 from .validator import recovery_parameters, transform_postgresql_parameter_value, transform_recovery_parameter_value
 
@@ -1212,7 +1213,8 @@ class ConfigHandler(object):
             'dbname': self._postgresql.database,
             'fallback_application_name': 'Patroni',
             'connect_timeout': 3,
-            'options': '-c statement_timeout=2000 -c gp_role=utility'
+            # user supplied options come last, so that it is possible to override our statement_timeout
+            'options': merge_options('-c statement_timeout=2000', self._superuser.get('options'))
         }
         # if the "username" parameter is present, it actually needs to be "user" for connecting to PostgreSQL
         if 'username' in local_conn_kwargs:

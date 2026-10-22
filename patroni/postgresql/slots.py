@@ -18,7 +18,7 @@ from ..file_perm import pg_perm
 from ..psycopg import OperationalError
 from ..tags import Tags
 from .connection import get_connection_cursor
-from .misc import format_lsn, fsync_dir, PostgresqlRole
+from .misc import format_lsn, fsync_dir, merge_options, PostgresqlRole
 
 if TYPE_CHECKING:  # pragma: no cover
     from psycopg import Cursor
@@ -489,7 +489,11 @@ class SlotsHandler:
 
         :yields: connection cursor object, note implementation varies depending on version of :mod:`psycopg`.
         """
-        conn_kwargs = {**self._postgresql.connection_pool.conn_kwargs, **kwargs}
+        pool_kwargs = self._postgresql.connection_pool.conn_kwargs
+        conn_kwargs = {**pool_kwargs, **kwargs}
+        if 'options' in kwargs:
+            # don't lose the libpq `options` configured for the whole pool, ours are appended and therefore win
+            conn_kwargs['options'] = merge_options(pool_kwargs.get('options'), kwargs['options'])
         with get_connection_cursor(**conn_kwargs) as cur:
             yield cur
 
@@ -646,7 +650,9 @@ class SlotsHandler:
         """
         conn_kwargs = leader.conn_kwargs(self._postgresql.config.rewind_credentials)
         conn_kwargs['dbname'] = self._postgresql.database
-        with get_connection_cursor(connect_timeout=3, options="-c statement_timeout=2000", **conn_kwargs) as cur:
+        # user supplied options come last, so that it is possible to override our statement_timeout
+        conn_kwargs['options'] = merge_options('-c statement_timeout=2000', conn_kwargs.get('options'))
+        with get_connection_cursor(connect_timeout=3, **conn_kwargs) as cur:
             yield cur
 
     def check_logical_slots_readiness(self, cluster: Cluster, tags: Tags) -> bool:

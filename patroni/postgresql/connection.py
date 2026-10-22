@@ -8,6 +8,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from psycopg import Connection, Cursor
     from psycopg2 import connection, cursor
 
+from .misc import merge_options
 from .. import psycopg
 from ..exceptions import PostgresConnectionException
 
@@ -39,7 +40,12 @@ class NamedConnection:
     @property
     def _conn_kwargs(self) -> Dict[str, Any]:
         """Connection parameters for this :class:`NamedConnection`."""
-        return {**self._pool.conn_kwargs, **self._kwargs_override, 'application_name': f'Patroni {self._name}'}
+        ret = {**self._pool.conn_kwargs, **self._kwargs_override, 'application_name': f'Patroni {self._name}'}
+        if 'options' in self._kwargs_override:
+            # the libpq `options` configured for the whole pool (e.g. from `authentication.superuser.options`)
+            # must not be lost, the connection specific ones are appended and therefore take precedence
+            ret['options'] = merge_options(self._pool.conn_kwargs.get('options'), self._kwargs_override['options'])
+        return ret
 
     def get(self) -> Union['connection', 'Connection[Any]']:
         """Get ``psycopg``/``psycopg2`` connection object.

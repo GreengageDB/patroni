@@ -29,7 +29,8 @@ from .callback_executor import CallbackAction, CallbackExecutor
 from .cancellable import CancellableSubprocess
 from .config import ConfigHandler, mtime
 from .connection import ConnectionPool, get_connection_cursor
-from .misc import parse_history, parse_lsn, postgres_major_version_to_int, PostgresqlRole, PostgresqlState
+from .misc import merge_options, parse_history, parse_lsn, postgres_major_version_to_int, \
+    PostgresqlRole, PostgresqlState
 from .mpp import AbstractMPP
 from .postmaster import PostmasterProcess
 from .slots import SlotsHandler
@@ -92,7 +93,6 @@ class Postgresql(object):
 
         self._pending_restart_reason = CaseInsensitiveDict()
         self.connection_pool = ConnectionPool()
-        self.connection_pool.conn_kwargs = {'gp_role': 'utility'}
         self._connection = self.connection_pool.get('heartbeat')
         self.mpp_handler = mpp.get_handler_impl(self)
         self._bin_dir = config.get('bin_dir') or ''
@@ -1110,7 +1110,9 @@ class Postgresql(object):
                                           **kwargs: Any) -> Generator[Union['cursor', 'Cursor[Any]'], None, None]:
         conn_kwargs = self.config.replication.copy()
         conn_kwargs.update(host=host, port=int(port) if port else None, user=conn_kwargs.pop('username'),
-                           connect_timeout=3, replication=1, options='-c statement_timeout=2000')
+                           connect_timeout=3, replication=1,
+                           # user supplied options come last, so that it is possible to override statement_timeout
+                           options=merge_options('-c statement_timeout=2000', conn_kwargs.get('options')))
         with get_connection_cursor(**conn_kwargs) as cur:
             yield cur
 
