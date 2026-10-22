@@ -1086,6 +1086,43 @@ class ConfigHandler(object):
             if self.triggerfile_good_name not in self._config['recovery_conf'] and value:
                 self._config['recovery_conf'][self.triggerfile_good_name] = value
 
+    @property
+    def _uses_wal_keep_size(self) -> bool:
+        """Check whether the local Postgres has ``wal_keep_size`` instead of ``wal_keep_segments``.
+
+        .. note::
+            ``wal_keep_segments`` was replaced with ``wal_keep_size`` in PostgreSQL v13, hence normally the major
+            version is enough to tell them apart. A fork, however, may be based on an older major version and still
+            provide the new GUC, e.g. Greengage 7 is based on v12 but has only ``wal_keep_size``. We ask the
+            ``postgres`` binary in this case, so that we don't write a GUC that doesn't exist.
+
+        :returns: ``True`` if ``wal_keep_size`` should be used, ``False`` if ``wal_keep_segments`` should be used or
+                  if the major version isn't known yet.
+        """
+        if self._postgresql.major_version >= 130000:
+            return True
+        if not self._postgresql.major_version:
+            return False
+        return 'wal_keep_segments' not in self._postgresql.available_gucs \
+            and 'wal_keep_size' in self._postgresql.available_gucs
+
+    def _is_guc_supported(self, name: str) -> bool:
+        """Check whether GUC *name* could be set on the local Postgres.
+
+        .. note::
+            The version when a GUC was introduced is known from :attr:`CMDLINE_OPTIONS`, but a fork may be based on
+            an older major version and still provide a GUC that upstream added later. Therefore, before discarding
+            a GUC we double check with the ``postgres`` binary.
+
+        :param name: name of the GUC.
+
+        :returns: ``True`` if the GUC is known to the local Postgres, otherwise ``False``.
+        """
+        if not self._postgresql.major_version:  # we don't know the version yet, assume that everything is supported
+            return True
+        return self._postgresql.major_version >= self.CMDLINE_OPTIONS.get(name, (0, 1, 90100))[2] \
+            or name in self._postgresql.available_gucs
+
     def get_server_parameters(self, config: Dict[str, Any]) -> CaseInsensitiveDict:
         parameters = config['parameters'].copy()
         listen_addresses, port = split_host_port(config['listen'], 5432)
@@ -1119,7 +1156,7 @@ class ConfigHandler(object):
         # Try to recalculate wal_keep_segments <-> wal_keep_size assuming that typical wal_segment_size is 16MB.
         # The real segment size could be estimated from pg_control, but we don't really care, because the only goal of
         # this exercise is improving cross version compatibility and user must set the correct parameter in the config.
-        if self._postgresql.major_version >= 120000:
+        if self._uses_wal_keep_size:
             wal_keep_segments = parameters.pop('wal_keep_segments', self.CMDLINE_OPTIONS['wal_keep_segments'][0])
             parameters.setdefault('wal_keep_size', str(int(wal_keep_segments) * 16) + 'MB')
         elif self._postgresql.major_version:
@@ -1128,8 +1165,7 @@ class ConfigHandler(object):
 
         self._postgresql.mpp_handler.adjust_postgres_gucs(parameters)
 
-        ret = CaseInsensitiveDict({k: v for k, v in parameters.items() if not self._postgresql.major_version
-                                   or self._postgresql.major_version >= self.CMDLINE_OPTIONS.get(k, (0, 1, 90100))[2]})
+        ret = CaseInsensitiveDict({k: v for k, v in parameters.items() if self._is_guc_supported(k)})
         ret.update({k: os.path.join(self._config_dir, ret[k])
                     for k in ('hba_file', 'ident_file', 'hosts_file') if k in ret})
         return ret

@@ -99,10 +99,14 @@ class Postgresql(ClusterSite):
         self._connection = self.connection_pool.get('heartbeat')
         self.mpp_handler = mpp.get_handler_impl(self)
         self._bin_dir = config.get('bin_dir') or ''
+        self._bin_name = config.get('bin_name') or EMPTY_DICT
         self._role_lock = Lock()
         self.set_role(PostgresqlRole.UNINITIALIZED)
         self.bootstrap = Bootstrap(self)
         self.bootstrapping = False
+        # must be initialized before the ConfigHandler, because the latter builds the server parameters already
+        # in its constructor, and for that it needs to know the GUCs available in this Postgres server
+        self._available_gucs = None
         self.config = ConfigHandler(self, config)
         self.config.check_directories()
 
@@ -135,8 +139,6 @@ class Postgresql(ClusterSite):
 
         # Last known running process
         self._postmaster_proc = None
-
-        self._available_gucs = None
 
         if self.is_running():
             # If we found postmaster process we need to figure out whether postgres is accepting connections
@@ -302,7 +304,7 @@ class Postgresql(ClusterSite):
 
         :returns: path to Postgres binary named *cmd*.
         """
-        return os.path.join(self._bin_dir, (self.config.get('bin_name', {}) or EMPTY_DICT).get(cmd, cmd))
+        return os.path.join(self._bin_dir, self._bin_name.get(cmd, cmd))
 
     def pg_ctl(self, cmd: str, *args: str, **kwargs: Any) -> bool:
         """Builds and executes pg_ctl command
@@ -346,6 +348,7 @@ class Postgresql(ClusterSite):
             return PgIsReadyStatus.UNKNOWN
 
     def reload_config(self, config: Dict[str, Any], sighup: bool = False) -> None:
+        self._bin_name = config.get('bin_name') or EMPTY_DICT
         self.config.reload_config(config, sighup)
         self._is_leader_retry.deadline = self.retry.deadline = config['retry_timeout'] / 2.0
 
