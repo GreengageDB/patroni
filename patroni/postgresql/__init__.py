@@ -811,6 +811,7 @@ class Postgresql(ClusterSite):
 
         options = ['--{0}={1}'.format(p, configuration[p]) for p in self.config.CMDLINE_OPTIONS
                    if p in configuration and p not in ('wal_keep_segments', 'wal_keep_size')]
+        options += self.mpp_handler.cmdline_options()
 
         if self.cancellable.is_cancelled:
             return False

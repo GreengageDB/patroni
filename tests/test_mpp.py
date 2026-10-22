@@ -50,4 +50,5 @@ class TestMPP(BaseTestPostgresql):
         self.assertIsNone(nullHandler.schedule_cache_rebuild())
         self.assertIsNone(nullHandler.bootstrap())
         self.assertIsNone(nullHandler.adjust_postgres_gucs({}))
+        self.assertEqual(nullHandler.cmdline_options(), [])
         self.assertFalse(nullHandler.ignore_replication_slot({}))
