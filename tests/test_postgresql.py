@@ -896,6 +896,23 @@ class TestPostgresql(BaseTestPostgresql):
                               " pg_controldata value will be used. Setting 'Pending restart' flag",
                               'max_wal_senders', 10, 5))
 
+    def test_wal_keep_naming(self):
+        config = {'parameters': {'wal_keep_segments': 8, 'max_connections': 100, 'max_prepared_transactions': 0},
+                  'listen': '*:5432'}
+
+        with patch.object(Postgresql, 'major_version', PropertyMock(return_value=120000)):
+            # vanilla v12 has only wal_keep_segments
+            parameters = self.p.config.get_server_parameters(config)
+            self.assertEqual(parameters['wal_keep_segments'], 8)
+            self.assertNotIn('wal_keep_size', parameters)
+
+            # a fork based on v12 that provides wal_keep_size instead (e.g. Greengage) gets wal_keep_size
+            gucs = {guc for guc in mock_available_gucs.return_value if guc != 'wal_keep_segments'}
+            with patch.object(Postgresql, 'available_gucs', PropertyMock(return_value=gucs)):
+                parameters = self.p.config.get_server_parameters(config)
+                self.assertEqual(parameters['wal_keep_size'], '128MB')
+                self.assertNotIn('wal_keep_segments', parameters)
+
     @patch('os.path.exists', Mock(return_value=True))
     @patch('os.path.isfile', Mock(return_value=False))
     def test_pgpass_is_dir(self):
@@ -1235,6 +1252,26 @@ class TestPostgresql2(BaseTestPostgresql):
         self.assertEqual(self.p.config.format_dsn(params),
                          'host=1 port=2 sslpassword=pwd sslcrldir=/ gssencmode=prefer channel_binding=prefer '
                          'target_session_attrs=read-write sslnegotiation=postgres')
+
+
+@patch('subprocess.call', Mock(return_value=0))
+@patch('patroni.psycopg.connect', psycopg_connect)
+class TestPostgresqlFork(BaseTestPostgresql):
+    """Postgres fork that is based on v12, but provides ``wal_keep_size``, which upstream introduced in v13."""
+
+    @patch('patroni.postgresql.CallbackExecutor', Mock())
+    @patch('subprocess.check_output', Mock(return_value=b'max_connections\nwal_keep_size'))
+    @patch.object(Postgresql, 'get_major_version', Mock(return_value=120000))
+    def setUp(self):
+        # the list of available GUCs is required already when the ConfigHandler object is created
+        super(TestPostgresqlFork, self).setUp()
+
+    def test_wal_keep_size(self):
+        config = {'parameters': {'wal_keep_segments': 8, 'max_connections': 100, 'max_prepared_transactions': 0},
+                  'listen': '*:5432'}
+        parameters = self.p.config.get_server_parameters(config)
+        self.assertEqual(parameters['wal_keep_size'], '128MB')
+        self.assertNotIn('wal_keep_segments', parameters)
 
 
 class TestPostgresqlStateMetrics(unittest.TestCase):
