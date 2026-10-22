@@ -31,6 +31,11 @@ etcd3:
   # `etcd` service of docker-compose-greengage.yml
   host: etcd:2379
 
+# Enables the Greengage specifics: the coordinator is started with
+# --gp_role=dispatch and the GUCs Greengage can't work without are raised to
+# its own minimums. The section has no settings, its mere presence is the switch.
+greengage: {}
+
 bootstrap:
   dcs:
     ttl: 30
@@ -71,19 +76,34 @@ postgresql:
     - host replication gpadmin samehost trust
     - host all all 0.0.0.0/0 md5
 
+  # A coordinator started by Patroni is in single node mode and accepts only
+  # utility mode connections, hence `-c gp_role=utility` for every user.
+  # Patroni appends these options to the ones it sets itself.
   authentication:
     replication:
       username: replicator
       password: replicator_pass
+      options: -c gp_role=utility
     superuser:
       username: patroni
       password: patroni_pass
+      options: -c gp_role=utility
     rewind:
       username: rewind_user
       password: rewind_pass
+      options: -c gp_role=utility
 
+  # `gp_dbid` of the gpdemo coordinator. pg_basebackup of Greengage requires it,
+  # it is only used if this node ever has to be re-cloned from the standby.
+  basebackup:
+    - target-gp-dbid: 1
+
+  # NB: parameters from the CMDLINE_OPTIONS list (max_connections,
+  # max_prepared_transactions, max_locks_per_transaction, max_worker_processes,
+  # wal_keep_size, ...) are silently ignored here, they are managed in DCS:
+  #   patronictl -c patroni.yaml edit-config test-cluster --force \
+  #       -p max_connections=150 -p max_prepared_transactions=250
   parameters:
-    max_prepared_transactions: 250
     unix_socket_directories: '/tmp'
 
 tags:
