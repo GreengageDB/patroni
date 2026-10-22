@@ -1248,7 +1248,9 @@ def get_postgres_version(bin_dir: Optional[str] = None, bin_name: str = 'postgre
         version = subprocess.check_output([binary, '--version']).decode()
     except OSError as e:
         raise PatroniException(f'Failed to get postgres version: {e}')
-    version = re.match(r'^[^\s]+ \(Greengage Database\) ((\d+)(\.\d+)*)', version)
+    # The parenthesized part is the product name, which may consist of more than one word, e.g.
+    # "postgres (PostgreSQL) 15.2", "postgres (Greengage Database) 12.22", or be missing altogether.
+    version = re.match(r'^[^\s]+ (?:\(.+?\) )?((\d+)(\.\d+)*)', version)
     if TYPE_CHECKING:  # pragma: no cover
         assert version is not None
     version = version.groups()  # e.g., ('15.2', '15', '.2')
