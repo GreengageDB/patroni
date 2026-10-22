@@ -95,7 +95,9 @@ class Rewind(object):
     @staticmethod
     def check_leader_is_not_in_recovery(conn_kwargs: Dict[str, Any]) -> Optional[bool]:
         try:
-            with get_connection_cursor(connect_timeout=3, options='-c statement_timeout=2000', **conn_kwargs) as cur:
+            with get_connection_cursor(connect_timeout=3,
+                                       options='-c statement_timeout=2000 -c gp_role=utility',
+                                       **conn_kwargs) as cur:
                 cur.execute('SELECT pg_catalog.pg_is_in_recovery()')
                 row = cur.fetchone()
                 if not row or not row[0]:
@@ -107,7 +109,9 @@ class Rewind(object):
     @staticmethod
     def check_leader_has_run_checkpoint(conn_kwargs: Dict[str, Any]) -> Optional[str]:
         try:
-            with get_connection_cursor(connect_timeout=3, options='-c statement_timeout=2000', **conn_kwargs) as cur:
+            with get_connection_cursor(connect_timeout=3,
+                                       options='-c statement_timeout=2000 -c gp_role=utility',
+                                       **conn_kwargs) as cur:
                 cur.execute("SELECT NOT pg_catalog.pg_is_in_recovery()"
                             " AND ('x' || pg_catalog.substr(pg_catalog.pg_walfile_name("
                             " pg_catalog.pg_current_wal_lsn()), 1, 8))::bit(32)::int = timeline_id"
@@ -465,7 +469,9 @@ class Rewind(object):
         user_options = process_user_options('rewind', options, not_allowed_options, logger.error)
         # prepare pg_rewind connection string
         env = self._postgresql.config.write_pgpass(conn_kwargs)
-        env.update(LANG='C', LC_ALL='C', PGOPTIONS='-c statement_timeout=0')
+        # Greengage: a coordinator started by Patroni is in single node mode and accepts
+        # only utility mode connections, hence the gp_role here and in the leader checks.
+        env.update(LANG='C', LC_ALL='C', PGOPTIONS='-c statement_timeout=0 -c gp_role=utility')
         dsn = self._postgresql.config.format_dsn({**conn_kwargs, 'password': None})
         logger.info('running pg_rewind from %s', dsn)
 
