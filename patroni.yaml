@@ -1,0 +1,97 @@
+## Patroni config for node1.
+## Meant to be used inside the `greengage` container of docker-compose-greengage.yml,
+## where this repository is mounted at /home/gpadmin/patroni.
+##
+## Prerequisites inside the container (as gpadmin):
+##   # unpack GPHOME (the image ships bin_gpdb.tar.gz only)
+##   source /home/gpadmin/gpdb_src/concourse/scripts/common.bash
+##   install_gpdb
+##   /home/gpadmin/gpdb_src/concourse/scripts/setup_gpadmin_user.bash 
+##   make_cluster
+##
+## Run:
+##   cd /home/gpadmin/patroni
+##   python3 patroni.py patroni.yaml
+##
+## node1 adopts the existing gpdemo coordinator, so the `bootstrap` section below is
+## only used if its data_dir is empty.
+
+scope: test-cluster
+namespace: /db/
+name: mdw  # unique node name
+
+restapi:
+  # listen on all interfaces: the REST API is published to the host as 8008
+  listen: 0.0.0.0:8008
+  # container hostname -- resolvable inside the container and from other
+  # services on the compose network
+  connect_address: greengage:8008
+
+etcd3:
+  # `etcd` service of docker-compose-greengage.yml
+  host: etcd:2379
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    postgresql:
+      use_pg_rewind: true
+
+postgresql:
+  listen: 0.0.0.0:7000
+  connect_address: greengage:7000
+  # coordinator of the gpdemo cluster (PORT_BASE=7000 -> coordinator port 7000)
+  data_dir: /home/gpadmin/gpdb_src/gpAux/gpdemo/datadirs/qddir/demoDataDir-1
+  # GPHOME of the unpacked bin_gpdb.tar.gz
+  bin_dir: /usr/local/greengage-db-devel/bin
+  pgpass: /tmp/pgpass0
+
+  # Patroni rewrites pg_hba.conf from this list on every start and on SIGHUP.
+  # It has to live here rather than under `bootstrap`: bootstrap.pg_hba is only
+  # applied when Patroni initdb's an empty data_dir, which never happens in this
+  # setup (node1 adopts the running gpdemo coordinator, node2 is pg_basebackup'd).
+  # NB: the file is replaced wholesale, so the gpadmin entries that the Greengage
+  # utilities rely on have to be repeated here.
+  pg_hba:
+    - local all all trust
+    # gpstart/gpstop/gpstate and segment -> coordinator connections
+    - host all gpadmin 0.0.0.0/0 trust
+    - host all gpadmin ::1/128 trust
+    # Patroni's own superuser and pg_rewind connections
+    - host all patroni 0.0.0.0/0 md5
+    - host all rewind_user 0.0.0.0/0 md5
+    # Streaming replication: the nodes reach each other over the container IP
+    # (host=greengage), so a 127.0.0.1-only entry is not enough -- without this
+    # line the walreceiver dies with "no pg_hba.conf entry for replication
+    # connection from host ...".
+    - host replication replicator 0.0.0.0/0 md5
+    - host replication gpadmin samehost trust
+    - host all all 0.0.0.0/0 md5
+
+  authentication:
+    replication:
+      username: replicator
+      password: replicator_pass
+    superuser:
+      username: patroni
+      password: patroni_pass
+    rewind:
+      username: rewind_user
+      password: rewind_pass
+
+  parameters:
+    max_prepared_transactions: 250
+    unix_socket_directories: '/tmp'
+
+tags:
+  nofailover: false
+  noloadbalance: false
+  clonefrom: false
+  nosync: false
+
+log:
+  level: DEBUG
+  traceback_level: DEBUG
