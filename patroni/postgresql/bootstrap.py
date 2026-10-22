@@ -293,7 +293,6 @@ class Bootstrap(object):
             "-X",
             "stream",
             "--dbname=" + conn_url,
-            "--target-gp-dbid=42",
         ] + user_options
 
         # pg_basebackup --progress reports the copy progress while it is running, therefore

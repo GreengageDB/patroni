@@ -28,6 +28,9 @@ etcd3:
   # `etcd` service of docker-compose-greengage.yml
   host: etcd:2379
 
+# Keep in sync with patroni.yaml, see the comment there.
+greengage: {}
+
 bootstrap:
   dcs:
     ttl: 30
@@ -63,19 +66,30 @@ postgresql:
     - host replication gpadmin samehost trust
     - host all all 0.0.0.0/0 md5
 
+  # A coordinator started by Patroni is in single node mode and accepts only
+  # utility mode connections, hence `-c gp_role=utility` for every user.
   authentication:
     replication:
       username: replicator
       password: replicator_pass
+      options: -c gp_role=utility
     superuser:
       username: patroni
       password: patroni_pass
+      options: -c gp_role=utility
     rewind:
       username: rewind_user
       password: rewind_pass
+      options: -c gp_role=utility
 
+  # `gp_dbid` of the gpdemo standby coordinator (1 coordinator + 3 primary and
+  # 3 mirror segments are dbid 1..7). Greengage's pg_basebackup requires it to
+  # write the right `gp_dbid` into the cloned data directory.
+  basebackup:
+    - target-gp-dbid: 8
+
+  # See the note in patroni.yaml: GUCs Patroni manages itself live in DCS.
   parameters:
-    max_prepared_transactions: 250
     unix_socket_directories: '/tmp'
 
 tags:
