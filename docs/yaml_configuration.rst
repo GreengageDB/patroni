@@ -91,6 +91,21 @@ Enables integration Patroni with `Citus <https://docs.citusdata.com>`__. If conf
 -  **group**: the Citus group id, integer. Use ``0`` for coordinator and ``1``, ``2``, etc... for workers
 -  **database**: the database where ``citus`` extension should be created. Must be the same on the coordinator and all workers. Currently only one database is supported.
 
+.. _greengage_settings:
+
+Greengage
+---------
+Enables integration of Patroni with the coordinator of a `Greengage DB <https://github.com/GreengageDB/greengage>`__ cluster. The section doesn't have any settings and an empty value is enough to enable it:
+
+.. code:: YAML
+
+    greengage: {}
+
+When enabled, Patroni starts the coordinator with ``--gp_role=dispatch`` and makes sure that GUCs which Greengage can't work without (``max_locks_per_transaction``, ``max_worker_processes``, ``max_prepared_transactions``) are not set lower than Greengage requires. All connections Patroni opens to the coordinator must be utility mode connections, therefore ``options: -c gp_role=utility`` has to be set for every user in the :ref:`postgresql.authentication <postgresql_settings>` section.
+
+.. note::
+    Unlike Citus, Greengage segments are not managed by Patroni, hence there are no groups and the layout of the keys in DCS is the same as for a standalone PostgreSQL cluster.
+
 .. _consul_settings:
 
 Consul
