@@ -5,7 +5,7 @@ supported MPP cluster. However, we may consider adapting other databases such as
 """
 import abc
 
-from typing import Any, Dict, Iterator, Optional, Tuple, Type, TYPE_CHECKING, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Type, TYPE_CHECKING, Union
 
 from ...dcs import Cluster
 from ...dynamic_loader import iter_classes
@@ -178,6 +178,19 @@ class AbstractMPPHandler(AbstractMPP):
 
         :param parameters: dictionary of GUCs, with key as GUC name and the corresponding value as current GUC value.
         """
+
+    def cmdline_options(self) -> List[str]:
+        """Additional command line options for the ``postgres`` process.
+
+        .. note::
+            Some GUCs can't be passed through ``postgresql.conf``, for example because the MPP database rejects the
+            value when it comes from a file. Such GUCs have to be set on the command line, like ``gp_role`` in
+            Greengage. Values returned from here are used only when Patroni starts postgres, they are not written
+            to ``postgresql.conf`` and are not compared with ``pg_settings``.
+
+        :returns: list of command line options, e.g. ``['--gp_role=dispatch']``. Empty list by default.
+        """
+        return []
 
     @abc.abstractmethod
     def ignore_replication_slot(self, slot: Dict[str, str]) -> bool:
