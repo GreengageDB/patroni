@@ -16,7 +16,7 @@ from ..dcs import Leader, RemoteMember
 from ..utils import process_user_options
 from . import Postgresql
 from .connection import get_connection_cursor
-from .misc import format_lsn, fsync_dir, parse_history, parse_lsn, PostgresqlRole
+from .misc import format_lsn, fsync_dir, merge_options, parse_history, parse_lsn, PostgresqlRole
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +233,11 @@ class Rewind(object):
 
     def _conn_kwargs(self, member: Union[Leader, RemoteMember], auth: Dict[str, Any]) -> Dict[str, Any]:
         ret = member.conn_kwargs(auth)
+        # Member.conn_kwargs() doesn't pass on the libpq `options` of the user. We need them, because some forks
+        # require them for connections to the leader (e.g. `-c gp_role=utility` for Greengage), and they are also
+        # passed to pg_rewind via PGOPTIONS.
+        if auth.get('options'):
+            ret['options'] = auth['options']
         if not ret.get('dbname'):
             ret['dbname'] = self._postgresql.database
         # Add target_session_attrs to make sure we hit the primary.
@@ -481,9 +486,11 @@ class Rewind(object):
         user_options = process_user_options('rewind', options, not_allowed_options, logger.error)
         # prepare pg_rewind connection string
         env = self._postgresql.config.write_pgpass(conn_kwargs)
-        # Greengage: a coordinator started by Patroni is in single node mode and accepts
-        # only utility mode connections, hence the gp_role here and in the leader checks.
-        env.update(LANG='C', LC_ALL='C', PGOPTIONS='-c statement_timeout=0 -c gp_role=utility')
+        # pg_rewind connects to the source server on its own and the connection string we build below can't
+        # carry libpq `options`, therefore they are passed to the child process via the environment. Greengage,
+        # for example, requires `gp_role=utility` for connections to the coordinator.
+        env.update(LANG='C', LC_ALL='C',
+                   PGOPTIONS=merge_options('-c statement_timeout=0', conn_kwargs.get('options')))
         dsn = self._postgresql.config.format_dsn({**conn_kwargs, 'password': None})
         logger.info('running pg_rewind from %s', dsn)
 

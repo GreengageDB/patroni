@@ -265,6 +265,7 @@ PostgreSQL
          -  **sslnegotiation**: (optional) maps to the `sslnegotiation <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLNEGOTIATION>`__ connection parameter, which controls how SSL encryption is negotiated with the server, if SSL is used.
          -  **gssencmode**: (optional) maps to the `gssencmode <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-GSSENCMODE>`__ connection parameter, which determines whether or with what priority a secure GSS TCP/IP connection will be negotiated with the server
          -  **channel_binding**: (optional) maps to the `channel_binding <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-CHANNEL-BINDING>`__ connection parameter, which controls the client's use of channel binding.
+         -  **options**: (optional) maps to the `options <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-OPTIONS>`__ connection parameter, which specifies command-line options to be sent to the server at connection start. Patroni appends the configured value to the options it sets itself, therefore it is possible to override them.
       -  **replication**:
 
          -  **username**: replication username; the user will be created during initialization. Replicas will use this user to access the replication source via streaming replication
@@ -279,6 +280,7 @@ PostgreSQL
          -  **sslnegotiation**: (optional) maps to the `sslnegotiation <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLNEGOTIATION>`__ connection parameter, which controls how SSL encryption is negotiated with the server, if SSL is used.
          -  **gssencmode**: (optional) maps to the `gssencmode <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-GSSENCMODE>`__ connection parameter, which determines whether or with what priority a secure GSS TCP/IP connection will be negotiated with the server
          -  **channel_binding**: (optional) maps to the `channel_binding <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-CHANNEL-BINDING>`__ connection parameter, which controls the client's use of channel binding.
+         -  **options**: (optional) maps to the `options <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-OPTIONS>`__ connection parameter, which specifies command-line options to be sent to the server at connection start. Patroni appends the configured value to the options it sets itself, therefore it is possible to override them.
       -  **rewind**:
 
          -  **username**: (optional) name for the user for ``pg_rewind``; the user will be created during initialization of postgres 11+ and all necessary `permissions <https://www.postgresql.org/docs/11/app-pgrewind.html#id-1.9.5.8.8>`__ will be granted.
@@ -293,6 +295,7 @@ PostgreSQL
          -  **sslnegotiation**: (optional) maps to the `sslnegotiation <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLNEGOTIATION>`__ connection parameter, which controls how SSL encryption is negotiated with the server, if SSL is used.
          -  **gssencmode**: (optional) maps to the `gssencmode <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-GSSENCMODE>`__ connection parameter, which determines whether or with what priority a secure GSS TCP/IP connection will be negotiated with the server
          -  **channel_binding**: (optional) maps to the `channel_binding <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-CHANNEL-BINDING>`__ connection parameter, which controls the client's use of channel binding.
+         -  **options**: (optional) maps to the `options <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-OPTIONS>`__ connection parameter, which specifies command-line options to be sent to the server at connection start. Patroni appends the configured value to the options it sets itself, therefore it is possible to override them.
 
    -  **callbacks**: callback scripts to run on certain actions. Patroni will pass the action, role and cluster name. (See scripts/aws.py as an example of how to write them.)
 

@@ -143,11 +143,6 @@ def connect(*args: Any, **kwargs: Any) -> Union['connection', 'Connection[Any]']
     :returns: a connection to the database. Can be either a :class:`psycopg.Connection` if using :mod:`psycopg`, or a
         :class:`psycopg2.extensions.connection` if using :mod:`psycopg2`.
     """
-    # Добавить gp_role=utility для Greengage
-    existing_options = kwargs.get('options', '')
-    if '-c gp_role=' not in existing_options:
-        kwargs['options'] = (existing_options + ' -c gp_role=utility').strip()
-
     if kwargs and 'replication' not in kwargs and kwargs.get('fallback_application_name') != 'Patroni ctl':
         options = [kwargs['options']] if 'options' in kwargs else []
         options.append('-c search_path=pg_catalog')

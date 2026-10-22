@@ -89,6 +89,12 @@ class TestRewind(BaseTestPostgresql):
             mock_debug.assert_any_call('not checking diverged timeline: pg_rewind is not possible'
                                        ' and remove_data_directory_on_diverged_timelines is not enabled')
 
+    def test__conn_kwargs(self):
+        # the libpq `options` of the user are kept for connections to the leader, they aren't by Member.conn_kwargs()
+        conn_kwargs = self.r._conn_kwargs(self.leader, {'username': 'foo', 'options': '-c gp_role=utility'})
+        self.assertEqual(conn_kwargs['options'], '-c gp_role=utility')
+        self.assertNotIn('options', self.r._conn_kwargs(self.leader, {'username': 'foo'}))
+
     def test_pg_rewind(self):
         r = {'user': '', 'host': '', 'port': '', 'database': '', 'password': ''}
         with patch.object(Postgresql, 'major_version', PropertyMock(return_value=150000)), \

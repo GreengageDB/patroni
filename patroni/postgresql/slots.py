@@ -18,7 +18,7 @@ from ..file_perm import pg_perm
 from ..psycopg import OperationalError
 from ..tags import Tags
 from .connection import get_connection_cursor
-from .misc import format_lsn, fsync_dir, PostgresqlRole
+from .misc import format_lsn, fsync_dir, merge_options, PostgresqlRole
 from .sync import SYNC_STRICT_PLACEHOLDER
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -576,7 +576,11 @@ class SlotsHandler:
 
         :yields: connection cursor object, note implementation varies depending on version of :mod:`psycopg`.
         """
-        conn_kwargs = {**self._postgresql.connection_pool.conn_kwargs, **kwargs}
+        pool_kwargs = self._postgresql.connection_pool.conn_kwargs
+        conn_kwargs = {**pool_kwargs, **kwargs}
+        if 'options' in kwargs:
+            # don't lose the libpq `options` configured for the whole pool, ours are appended and therefore win
+            conn_kwargs['options'] = merge_options(pool_kwargs.get('options'), kwargs['options'])
         with get_connection_cursor(**conn_kwargs) as cur:
             yield cur
 
@@ -730,8 +734,13 @@ class SlotsHandler:
 
         :yields: connection cursor object, note implementation varies depending on version of ``psycopg``.
         """
-        conn_kwargs = leader.conn_kwargs(self._postgresql.config.rewind_credentials)
+        auth = self._postgresql.config.rewind_credentials
+        conn_kwargs = leader.conn_kwargs(auth)
         conn_kwargs['dbname'] = self._postgresql.database
+        # Member.conn_kwargs() doesn't pass on the libpq `options` of the user, get_connection_cursor() appends them
+        # to the default ones
+        if auth.get('options'):
+            conn_kwargs['options'] = auth['options']
         with get_connection_cursor(**conn_kwargs) as cur:
             yield cur
 

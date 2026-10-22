@@ -8,6 +8,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from psycopg import Connection, Cursor
     from psycopg2 import connection, cursor
 
+from .misc import merge_options
 from .. import psycopg
 from ..exceptions import PostgresConnectionException
 
@@ -42,7 +43,12 @@ class NamedConnection:
     @property
     def _conn_kwargs(self) -> Dict[str, Any]:
         """Connection parameters for this :class:`NamedConnection`."""
-        return {**self._pool.conn_kwargs, **self._kwargs_override, 'application_name': f'Patroni {self._name}'}
+        ret = {**self._pool.conn_kwargs, **self._kwargs_override, 'application_name': f'Patroni {self._name}'}
+        if 'options' in self._kwargs_override:
+            # the libpq `options` configured for the whole pool (e.g. from `authentication.superuser.options`)
+            # must not be lost, the connection specific ones are appended and therefore take precedence
+            ret['options'] = merge_options(self._pool.conn_kwargs.get('options'), self._kwargs_override['options'])
+        return ret
 
     def get(self) -> Union['connection', 'Connection[Any]']:
         """Get ``psycopg``/``psycopg2`` connection object.
@@ -129,9 +135,12 @@ class ConnectionPool:
         :param value: :class:`dict` object with connection parameters.
         """
         with self._lock:
-            self._conn_kwargs = {'connect_timeout': DEFAULT_CONNECT_TIMEOUT,
-                                 'options': DEFAULT_CONNECTION_OPTIONS + ' -c pg_stat_statements.track=none',
-                                 'fallback_application_name': 'Patroni', **value}
+            # user supplied options (e.g. from `authentication.superuser.options`) come last,
+            # so that it is possible to override our defaults
+            options = merge_options(DEFAULT_CONNECTION_OPTIONS, '-c pg_stat_statements.track=none',
+                                    value.get('options'))
+            self._conn_kwargs = {'connect_timeout': DEFAULT_CONNECT_TIMEOUT, 'fallback_application_name': 'Patroni',
+                                 **value, 'options': options}
 
     def get(self, name: str, kwargs_override: Optional[Dict[str, Any]] = None) -> NamedConnection:
         """Get a new named :class:`NamedConnection` object from the pool.
@@ -160,7 +169,10 @@ class ConnectionPool:
 
 @contextmanager
 def get_connection_cursor(**kwargs: Any) -> Generator[Union['cursor', 'Cursor[Any]'], None, None]:
-    conn_kwargs = {'connect_timeout': DEFAULT_CONNECT_TIMEOUT, 'options': DEFAULT_CONNECTION_OPTIONS, **kwargs}
+    # options passed by the caller, e.g. the ones of the user from the `authentication` section,
+    # are appended to the default ones and therefore take precedence
+    conn_kwargs = {'connect_timeout': DEFAULT_CONNECT_TIMEOUT, **kwargs,
+                   'options': merge_options(DEFAULT_CONNECTION_OPTIONS, kwargs.get('options'))}
     conn = psycopg.connect(**conn_kwargs)
     with conn.cursor() as cur:
         yield cur
