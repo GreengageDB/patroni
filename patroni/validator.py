@@ -1278,6 +1278,7 @@ schema = Schema({
         "database": str,
         "group": IntValidator(min=0, expected_type=int, raise_assert=True),
     },
+    Optional("greengage"): {},
     "postgresql": {
         "listen": validate_host_port_listen_multiple_hosts,
         "connect_address": validate_connect_address,
