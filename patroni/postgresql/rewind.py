@@ -481,7 +481,9 @@ class Rewind(object):
         user_options = process_user_options('rewind', options, not_allowed_options, logger.error)
         # prepare pg_rewind connection string
         env = self._postgresql.config.write_pgpass(conn_kwargs)
-        env.update(LANG='C', LC_ALL='C', PGOPTIONS='-c statement_timeout=0')
+        # Greengage: a coordinator started by Patroni is in single node mode and accepts
+        # only utility mode connections, hence the gp_role here and in the leader checks.
+        env.update(LANG='C', LC_ALL='C', PGOPTIONS='-c statement_timeout=0 -c gp_role=utility')
         dsn = self._postgresql.config.format_dsn({**conn_kwargs, 'password': None})
         logger.info('running pg_rewind from %s', dsn)
 
