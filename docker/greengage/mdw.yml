@@ -70,9 +70,10 @@ postgresql:
     - host replication gpadmin samehost trust
     - host all all 0.0.0.0/0 md5
 
-  # A coordinator started by Patroni is in single node mode and accepts only
-  # utility mode connections, hence `-c gp_role=utility` for every user.
-  # Patroni appends these options to the ones it sets itself.
+  # Patroni's connections to the coordinators must be utility mode ones (in dispatch
+  # mode they fail on a freshly registered standby and pg_rewind silently breaks the
+  # data directory), hence `-c gp_role=utility`. Patroni refuses to start without it
+  # for the superuser and the rewind user, for the replication user it is harmless.
   authentication:
     replication:
       username: replicator
