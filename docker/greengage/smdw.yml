@@ -96,6 +96,8 @@ tags:
   clonefrom: false
   nosync: false
 
-log:
-  level: DEBUG
-  traceback_level: DEBUG
+# Patroni logs at INFO by default. For troubleshooting, e.g. to see the exact
+# pg_basebackup command line or the DCS traffic, uncomment:
+# log:
+#   level: DEBUG
+#   traceback_level: DEBUG
