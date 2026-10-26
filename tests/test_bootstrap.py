@@ -57,6 +57,13 @@ class TestBootstrap(BaseTestPostgresql):
         self.p.config._config['basebackup'] = {"foo": "bar"}
         self.assertEqual(self.b.create_replica(self.leader), 0)
 
+        # the MPP handler gets the leader and may veto pg_basebackup, e.g. when Greengage can't assign the dbid
+        with patch.object(self.p.mpp_handler, 'basebackup_options', Mock(return_value=None)) as mock_options, \
+                patch.object(Bootstrap, 'basebackup') as mock_basebackup:
+            self.assertEqual(self.b.create_replica(self.leader, leader=self.leader), 1)
+            mock_options.assert_called_once_with(self.leader)
+            mock_basebackup.assert_not_called()
+
         self.p.config._config['create_replica_methods'] = ['wale', 'basebackup']
         del self.p.config._config['basebackup']
         mock_cancellable_subprocess_call.return_value = 1
@@ -108,6 +115,18 @@ class TestBootstrap(BaseTestPostgresql):
                 'calling: %r',
                 ['pg_basebackup', f'--pgdata={self.p.data_dir}', '-X', 'stream', '--dbname=', '--foo=bar'],
             )
+
+        # Test MPP options: they come before the user options and can't be overridden by them
+        with patch('patroni.postgresql.bootstrap.logger.debug') as mock_debug, \
+                patch('patroni.postgresql.bootstrap.logger.error') as mock_error:
+            self.p.cancellable.reset_is_cancelled()
+            self.b.basebackup("", None, {'target-gp-dbid': '1', 'foo': 'bar'}, ['--target-gp-dbid=9'])
+            mock_debug.assert_called_with(
+                'calling: %r',
+                ['pg_basebackup', f'--pgdata={self.p.data_dir}', '-X', 'stream', '--dbname=',
+                 '--target-gp-dbid=9', '--foo=bar'],
+            )
+            mock_error.assert_called_once_with('target-gp-dbid option for basebackup is not allowed')
 
         # Test compress option: server-side compression should be allowed on PG15+ (issue #3532)
         with patch('patroni.postgresql.bootstrap.logger.debug') as mock_debug:

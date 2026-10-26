@@ -93,10 +93,11 @@ postgresql:
       password: rewind_pass
       options: -c gp_role=utility
 
-  # `gp_dbid` of the gpdemo coordinator. pg_basebackup of Greengage requires it,
-  # it is only used if this node ever has to be re-cloned from the standby.
-  basebackup:
-    - target-gp-dbid: 1
+  # NB: no `basebackup: target-gp-dbid` here. When the node is cloned, Patroni
+  # registers it as the coordinator standby on the leader and passes the dbid
+  # assigned there to pg_basebackup. The replication user must be able to read
+  # all settings for Greengage's pg_basebackup (it runs `SHOW log_directory`):
+  #   GRANT pg_read_all_settings TO replicator;
 
   # NB: parameters from the CMDLINE_OPTIONS list (max_connections,
   # max_prepared_transactions, max_locks_per_transaction, max_worker_processes,

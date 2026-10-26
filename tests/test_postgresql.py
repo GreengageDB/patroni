@@ -333,6 +333,13 @@ class TestPostgresql(BaseTestPostgresql):
                     'primary_slot_name', '', '', 'string', 'postmaster', self.p.config._postgresql_conf]
                 self.assertEqual(self.p.config.check_recovery_conf(None), (True, True))
 
+    def test_primary_conninfo_params_without_options(self):
+        # `options` of the replication user can't be written to primary_conninfo, so they must not be expected there
+        self.p.config.replication['options'] = '-c gp_role=utility'
+        params = self.p.config.primary_conninfo_params(self.leader)
+        self.assertNotIn('options', params)
+        self.assertEqual(self.p.config.replication['options'], '-c gp_role=utility')
+
     @patch.object(Postgresql, 'major_version', PropertyMock(return_value=120000))
     @patch.object(Postgresql, 'is_running', MockPostmaster)
     @patch.object(MockPostmaster, 'create_time', Mock(return_value=1234567), create=True)
@@ -394,7 +401,13 @@ class TestPostgresql(BaseTestPostgresql):
     def test_follow(self):
         self.p.call_nowait(CallbackAction.ON_START)
         m = RemoteMember('1', {'restore_command': '2', 'primary_slot_name': 'foo', 'conn_kwargs': {'host': 'foo,bar'}})
-        self.p.follow(m)
+        with patch.object(self.p.mpp_handler, 'before_follow') as mock_before_follow:
+            self.p.follow(m)
+            mock_before_follow.assert_called_once_with(m)
+            # neither a reload nor the standby leader restarts postgres as a replica
+            self.p.follow(m, do_reload=True)
+            self.p.follow(m, role=PostgresqlRole.STANDBY_LEADER)
+            mock_before_follow.assert_called_once()
         with patch.object(Postgresql, 'ensure_major_version_is_known', Mock(return_value=False)):
             self.assertIsNone(self.p.follow(m))
 

@@ -82,11 +82,8 @@ postgresql:
       password: rewind_pass
       options: -c gp_role=utility
 
-  # `gp_dbid` of the gpdemo standby coordinator (1 coordinator + 3 primary and
-  # 3 mirror segments are dbid 1..7). Greengage's pg_basebackup requires it to
-  # write the right `gp_dbid` into the cloned data directory.
-  basebackup:
-    - target-gp-dbid: 8
+  # See the note in patroni.yaml: the dbid for pg_basebackup is assigned when
+  # the node is registered as the coordinator standby on the leader.
 
   # See the note in patroni.yaml: GUCs Patroni manages itself live in DCS.
   parameters:

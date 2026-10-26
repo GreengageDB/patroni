@@ -104,6 +104,8 @@ Enables integration of Patroni with the coordinator of a `Greengage DB <https://
 
 When enabled, Patroni starts the coordinator with ``--gp_role=dispatch`` and makes sure that GUCs which Greengage can't work without (``max_locks_per_transaction``, ``max_worker_processes``, ``max_prepared_transactions``) are not set lower than Greengage requires. All connections Patroni opens to the coordinator must be utility mode connections, therefore ``options: -c gp_role=utility`` has to be set for every user in the :ref:`postgresql.authentication <postgresql_settings>` section.
 
+Greengage keeps the coordinators in ``gp_segment_configuration`` and on promotion of the standby removes the row of the old coordinator. Therefore, before a node starts to replicate from the leader, Patroni registers it there as the coordinator standby with ``gp_add_coordinator_standby()`` and writes the dbid assigned by the catalog as ``gp_dbid`` to ``internal.auto.conf`` of the node. When a new replica is created with ``pg_basebackup``, it is registered beforehand and the dbid is passed as ``--target-gp-dbid``, hence the option can't be set in :ref:`postgresql.basebackup <postgresql_settings>`. Greengage's ``pg_basebackup`` reads settings of the source server, so the replication user needs ``GRANT pg_read_all_settings TO <replication user>``.
+
 .. note::
     Unlike Citus, Greengage segments are not managed by Patroni, hence there are no groups and the layout of the keys in DCS is the same as for a standalone PostgreSQL cluster.
 

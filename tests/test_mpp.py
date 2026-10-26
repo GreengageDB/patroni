@@ -1,4 +1,7 @@
+import os
+
 from typing import Any
+from unittest.mock import patch
 
 from patroni.exceptions import PatroniException
 from patroni.postgresql.mpp import AbstractMPP, get_mpp, Null
@@ -52,6 +55,8 @@ class TestMPP(BaseTestPostgresql):
         self.assertIsNone(nullHandler.bootstrap())
         self.assertIsNone(nullHandler.adjust_postgres_gucs({}))
         self.assertEqual(nullHandler.cmdline_options(), [])
+        self.assertIsNone(nullHandler.before_follow(self.cluster.leader))
+        self.assertEqual(nullHandler.basebackup_options(self.cluster.leader), [])
         self.assertFalse(nullHandler.ignore_replication_slot({}))
 
     def test_greengage_handler(self):
@@ -88,3 +93,66 @@ class TestMPP(BaseTestPostgresql):
         handler.adjust_postgres_gucs(parameters)
         self.assertEqual(parameters, {'max_locks_per_transaction': 128, 'max_worker_processes': 13,
                                       'max_prepared_transactions': '200', 'max_connections': '150'})
+
+    @patch('patroni.postgresql.mpp.greengage.get_connection_cursor')
+    def test_greengage_standby_registration(self, mock_get_cursor):
+        handler = get_mpp({'greengage': {}}).get_handler_impl(self.p)
+        leader = self.cluster.leader
+        internal_auto_conf = os.path.join(self.p.data_dir, 'internal.auto.conf')
+        cur = mock_get_cursor.return_value.__enter__.return_value
+        # how this node is known to the cluster: connect_address, port from listen, normalized data_dir
+        registered = (8, '127.0.0.2', 5432, self.p.data_dir + '/')
+
+        # the leader is still in recovery
+        cur.fetchone.side_effect = [(True,)]
+        self.assertIsNone(handler.register_standby(leader))
+
+        # the connection is a utility mode one: options of the superuser are passed to get_connection_cursor()
+        self.p.config.superuser['options'] = '-c gp_role=utility'
+        cur.fetchone.side_effect = [(False,), registered]
+        self.assertEqual(handler.register_standby(leader), 8)
+        self.assertEqual(mock_get_cursor.call_args[1]['options'], '-c gp_role=utility')
+
+        # another standby is registered already, we don't replace it
+        cur.fetchone.side_effect = [(False,), (8, 'other', 5432, '/data')]
+        self.assertIsNone(handler.register_standby(leader))
+
+        # no standby, register this node
+        cur.fetchone.side_effect = [(False,), None, (9,)]
+        self.assertEqual(handler.register_standby(leader), 9)
+        cur.execute.assert_called_with('SELECT pg_catalog.gp_add_coordinator_standby(%s, %s, %s, %s)',
+                                       ('127.0.0.2', '127.0.0.2', self.p.data_dir, 5432))
+
+        # the leader is unreachable
+        mock_get_cursor.side_effect = Exception
+        self.assertIsNone(handler.register_standby(leader))
+        self.assertIsNone(handler.basebackup_options(leader))
+        self.assertIsNone(handler.basebackup_options(None))
+        mock_get_cursor.side_effect = None
+
+        # before_follow() doesn't touch gp_dbid if the node couldn't be registered
+        cur.fetchone.side_effect = [(True,)]
+        handler.before_follow(leader)
+        self.assertFalse(os.path.exists(internal_auto_conf))
+        self.assertIsNone(handler.get_local_dbid())
+
+        # gp_dbid is written if it is missing, other settings in the file are kept
+        cur.fetchone.side_effect = [(False,), registered]
+        handler.before_follow(leader)
+        self.assertEqual(handler.get_local_dbid(), 8)
+        with open(internal_auto_conf, 'w') as f:
+            f.write("foo = 'bar'\ngp_dbid='1'\n")
+        self.assertEqual(handler.get_local_dbid(), 1)
+        cur.fetchone.side_effect = [(False,), registered]
+        handler.before_follow(leader)
+        with open(internal_auto_conf) as f:
+            self.assertEqual(f.read(), "foo = 'bar'\ngp_dbid=8\n")
+
+        # gp_dbid matches, nothing to do
+        cur.fetchone.side_effect = [(False,), registered]
+        with patch.object(handler, 'set_local_dbid') as mock_set_local_dbid:
+            handler.before_follow(leader)
+            mock_set_local_dbid.assert_not_called()
+
+        cur.fetchone.side_effect = [(False,), registered]
+        self.assertEqual(handler.basebackup_options(leader), ['--target-gp-dbid=8'])

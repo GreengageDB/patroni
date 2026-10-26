@@ -1195,6 +1195,9 @@ class Postgresql(ClusterSite):
         if change_role:
             self.__cb_pending = CallbackAction.NOOP
 
+        if member and role == PostgresqlRole.REPLICA and not do_reload:
+            self.mpp_handler.before_follow(member)
+
         ret = True
         if self.is_running():
             if do_reload:

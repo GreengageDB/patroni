@@ -7,7 +7,7 @@ import abc
 
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Type, TYPE_CHECKING, Union
 
-from ...dcs import Cluster
+from ...dcs import Cluster, Leader, Member
 from ...dynamic_loader import iter_classes
 from ...exceptions import PatroniException
 
@@ -189,6 +189,29 @@ class AbstractMPPHandler(AbstractMPP):
             to ``postgresql.conf`` and are not compared with ``pg_settings``.
 
         :returns: list of command line options, e.g. ``['--gp_role=dispatch']``. Empty list by default.
+        """
+        return []
+
+    def before_follow(self, leader: Union[Leader, Member]) -> None:
+        """Is called before postgres is started or restarted as a replica of the *leader*.
+
+        .. note::
+            The MPP database may keep its own registry of the nodes, which has to be updated before postgres is
+            started, e.g. Greengage reads the ``gp_dbid`` of the node only on start.
+
+        :param leader: the member postgres is going to replicate from.
+        """
+
+    def basebackup_options(self, leader: Optional[Leader]) -> Optional[List[str]]:
+        """Additional command line options for ``pg_basebackup``.
+
+        .. note::
+            The options returned from here can't be overridden with ``postgresql.basebackup``.
+
+        :param leader: the leader of the cluster, if known. The replica isn't necessarily cloned from it.
+
+        :returns: list of command line options, e.g. ``['--target-gp-dbid=9']``, empty list by default, or ``None``
+                  if ``pg_basebackup`` can't be used right now.
         """
         return []
 
