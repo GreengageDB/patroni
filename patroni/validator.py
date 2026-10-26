@@ -1278,7 +1278,8 @@ schema = Schema({
         "database": str,
         "group": IntValidator(min=0, expected_type=int, raise_assert=True),
     },
-    Optional("greengage"): {},
+    # the section has no settings, an empty value is fine too, the same as Greengage.validate_config() accepts
+    Optional("greengage"): Or(dict, type(None)),
     "postgresql": {
         "listen": validate_host_port_listen_multiple_hosts,
         "connect_address": validate_connect_address,
