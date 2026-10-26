@@ -195,4 +195,4 @@ class TestMPP(BaseTestPostgresql):
             mock_set_local_dbid.assert_not_called()
 
         cur.fetchone.side_effect = [(False,), registered]
-        self.assertEqual(handler.basebackup_options(leader), ['--target-gp-dbid=8'])
+        self.assertEqual(handler.basebackup_options(leader), ['--target-gp-dbid=8', '--no-verify-checksums'])

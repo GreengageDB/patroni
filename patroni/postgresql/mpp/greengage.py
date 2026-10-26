@@ -305,15 +305,19 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
             registering the new node as the coordinator standby on the *leader*, which is not necessarily the
             member the replica is cloned from.
 
+            Checksums are not verified, the same way as ``gpinitstandby`` does it: the verification fails on
+            append-optimized tables, whose files don't have the page layout it expects.
+
         :param leader: the leader of the cluster, if known.
 
-        :returns: a list with the ``--target-gp-dbid`` option, or ``None`` if the node couldn't be registered.
+        :returns: a list with the ``--target-gp-dbid`` and ``--no-verify-checksums`` options, or ``None`` if the node
+            couldn't be registered.
         """
         dbid = self.register_standby(leader) if leader else None
         if dbid is None:
             logger.error('Greengage: no dbid for the new coordinator standby, pg_basebackup is not possible')
             return None
-        return ['--target-gp-dbid={0}'.format(dbid)]
+        return ['--target-gp-dbid={0}'.format(dbid), '--no-verify-checksums']
 
     def adjust_postgres_gucs(self, parameters: Dict[str, Any]) -> None:
         """Adjust GUCs in the current PostgreSQL configuration.
