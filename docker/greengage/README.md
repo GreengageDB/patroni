@@ -13,9 +13,9 @@ It is meant for development and testing only.
 Steps (from the repository root):
 
 ```
-# -v drops the etcd volume: etcd must not keep the cluster ID of a previous run,
-# otherwise Patroni exits with "system ID mismatch"
-docker compose -f docker-compose-greengage.yml down -v
+# remove the containers of a previous run, if any: etcd must start empty, otherwise it
+# keeps the cluster ID of the previous Greengage cluster and Patroni exits with "system ID mismatch"
+docker compose -f docker-compose-greengage.yml down
 docker compose -f docker-compose-greengage.yml up -d
 docker compose -f docker-compose-greengage.yml exec greengage bash
 ```
