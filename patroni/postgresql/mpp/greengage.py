@@ -25,8 +25,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 
 from ...dcs import Cluster, Leader, Member
 from ...exceptions import ConfigParseError
+from ...file_perm import pg_perm
 from ...utils import parse_int, split_host_port
 from ..connection import get_connection_cursor
+from ..misc import fsync_dir
 from . import AbstractMPP, AbstractMPPHandler
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -218,12 +220,17 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
             with open(self._internal_auto_conf) as f:
                 lines = [line for line in f if line.partition('=')[0].strip() != 'gp_dbid']
         lines.append('gp_dbid={0}\n'.format(dbid))
+        # the file is replaced atomically, with the permissions of the files in PGDATA, the same way as
+        # Patroni writes replication slots
+        pg_perm.set_permissions_from_data_directory(self._postgresql.data_dir)
         tmp = self._internal_auto_conf + '.tmp'
         with open(tmp, 'w') as f:
+            os.chmod(tmp, pg_perm.file_create_mode)
             f.writelines(lines)
             f.flush()
             os.fsync(f.fileno())
         os.rename(tmp, self._internal_auto_conf)
+        fsync_dir(self._postgresql.data_dir)
 
     def _register(self, cur: Any, host: str, port: int, data_dir: str) -> Optional[int]:
         cur.execute('SELECT pg_catalog.pg_is_in_recovery()')

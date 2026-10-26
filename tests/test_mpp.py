@@ -1,9 +1,11 @@
 import os
+import stat
 
 from typing import Any
 from unittest.mock import patch
 
 from patroni.exceptions import ConfigParseError, PatroniException
+from patroni.file_perm import pg_perm
 from patroni.postgresql.mpp import AbstractMPP, get_mpp, Null
 from patroni.postgresql.mpp.greengage import get_gp_role, Greengage
 
@@ -169,9 +171,14 @@ class TestMPP(BaseTestPostgresql):
             f.write("foo = 'bar'\ngp_dbid='1'\n")
         self.assertEqual(handler.get_local_dbid(), 1)
         cur.fetchone.side_effect = [(False,), registered]
-        handler.before_follow(leader)
+        with patch('patroni.postgresql.mpp.greengage.fsync_dir') as mock_fsync_dir:
+            handler.before_follow(leader)
+            mock_fsync_dir.assert_called_once_with(self.p.data_dir)
         with open(internal_auto_conf) as f:
             self.assertEqual(f.read(), "foo = 'bar'\ngp_dbid=8\n")
+        # the file gets the permissions of files in PGDATA and is replaced atomically
+        self.assertEqual(stat.S_IMODE(os.stat(internal_auto_conf).st_mode), pg_perm.file_create_mode)
+        self.assertFalse(os.path.exists(internal_auto_conf + '.tmp'))
 
         # gp_dbid matches, nothing to do
         cur.fetchone.side_effect = [(False,), registered]
