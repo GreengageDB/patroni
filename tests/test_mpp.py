@@ -128,7 +128,7 @@ class TestMPP(BaseTestPostgresql):
         internal_auto_conf = os.path.join(self.p.data_dir, 'internal.auto.conf')
         cur = mock_get_cursor.return_value.__enter__.return_value
         # how this node is known to the cluster: connect_address, port from listen, normalized data_dir
-        registered = (8, '127.0.0.2', 5432, self.p.data_dir + '/')
+        registered = (8, 'mdw', '127.0.0.2', 5432, self.p.data_dir + '/')
 
         # the leader is still in recovery
         cur.fetchone.side_effect = [(True,)]
@@ -141,7 +141,15 @@ class TestMPP(BaseTestPostgresql):
         self.assertEqual(mock_get_cursor.call_args[1]['options'], '-c gp_role=utility')
 
         # another standby is registered already, we don't replace it
-        cur.fetchone.side_effect = [(False,), (8, 'other', 5432, '/data')]
+        cur.fetchone.side_effect = [(False,), (8, 'other', 'other', 5432, '/data')]
+        self.assertIsNone(handler.register_standby(leader))
+        # the same host and port, but a different data directory: a different standby as well
+        cur.fetchone.side_effect = [(False,), (8, 'mdw', '127.0.0.2', 5432, '/data')]
+        self.assertIsNone(handler.register_standby(leader))
+        # registered by the host name, which matches connect_address, while the address is an IP
+        cur.fetchone.side_effect = [(False,), (8, '127.0.0.2', '10.0.0.1', 5432, self.p.data_dir)]
+        self.assertEqual(handler.register_standby(leader), 8)
+        cur.fetchone.side_effect = [(False,), (8, 'other', 'other', 5432, '/data')]
         self.assertIsNone(handler.register_standby(leader))
 
         # no standby, register this node

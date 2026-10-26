@@ -239,14 +239,16 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
             logger.info('Greengage: the leader is still in recovery, postponing the standby registration')
             return None
 
-        cur.execute("SELECT dbid, address, port, datadir FROM pg_catalog.gp_segment_configuration"
+        cur.execute("SELECT dbid, hostname, address, port, datadir FROM pg_catalog.gp_segment_configuration"
                     " WHERE content = -1 AND role = 'm'")
         row = cur.fetchone()
         if row:
-            if (row[1], row[2], os.path.normpath(row[3])) == (host, port, data_dir):
+            # gpinitstandby may have registered this node by its host name or by its address, e.g. an IP, while the
+            # host from connect_address could be either of them
+            if host in (row[1], row[2]) and (row[3], os.path.normpath(row[4])) == (port, data_dir):
                 return row[0]
             logger.warning('Greengage: the leader already has a different coordinator standby registered'
-                           ' (dbid=%s %s:%s %s), not registering %s:%s %s', *row, host, port, data_dir)
+                           ' (dbid=%s %s/%s:%s %s), not registering %s:%s %s', *row, host, port, data_dir)
             return None
 
         cur.execute('SELECT pg_catalog.gp_add_coordinator_standby(%s, %s, %s, %s)', (host, host, data_dir, port))
