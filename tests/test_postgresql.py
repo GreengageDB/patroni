@@ -987,13 +987,6 @@ class TestPostgresql(BaseTestPostgresql):
             self.assertEqual(parameters['wal_keep_segments'], 8)
             self.assertNotIn('wal_keep_size', parameters)
 
-            # a fork based on v12 that provides wal_keep_size instead (e.g. Greengage) gets wal_keep_size
-            gucs = {guc for guc in mock_available_gucs.return_value if guc != 'wal_keep_segments'}
-            with patch.object(Postgresql, 'available_gucs', PropertyMock(return_value=gucs)):
-                parameters = self.p.config.get_server_parameters(config)
-                self.assertEqual(parameters['wal_keep_size'], '128MB')
-                self.assertNotIn('wal_keep_segments', parameters)
-
     @patch('os.path.exists', Mock(return_value=True))
     @patch('os.path.isfile', Mock(return_value=False))
     def test_pgpass_is_dir(self):

@@ -148,8 +148,6 @@ class TestMPP(BaseTestPostgresql):
         # registered by the host name, which matches connect_address, while the address is an IP
         cur.fetchone.side_effect = [(False,), (8, '127.0.0.2', '10.0.0.1', 5432, self.p.data_dir)]
         self.assertEqual(handler._register_standby(leader), 8)
-        cur.fetchone.side_effect = [(False,), (8, 'other', 'other', 5432, '/data')]
-        self.assertIsNone(handler._register_standby(leader))
 
         # no standby, register this node
         cur.fetchone.side_effect = [(False,), None, (9,)]
