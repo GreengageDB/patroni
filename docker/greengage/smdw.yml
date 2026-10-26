@@ -1,17 +1,13 @@
-## Patroni config for standby coordinator.
+## Patroni config for smdw, the standby coordinator of the gpdemo cluster.
 ## Meant to be used inside the `greengage` container of docker-compose-greengage.yml,
-## where this repository is mounted at /home/gpadmin/patroni.
+## where this repository is mounted at /home/gpadmin/patroni. See README.md in this
+## directory for the complete setup.
 ##
-## Prerequisites inside the container (as gpadmin):
-##   source /usr/local/greengage-db-devel/greengage_path.sh
-##   mdw is already running (see patroni.yaml)
+## Run (as gpadmin, once mdw holds the leader lock):
+##   python3 -m patroni ~/patroni/docker/greengage/smdw.yml
 ##
-## Run (second shell in the same container):
-##   docker compose -f docker-compose-greengage.yml exec greengage bash
-##   cd /home/gpadmin/patroni
-##   python3 patroni.py standby.yaml
-##
-## data_dir is expected to be empty: node2 is created by pg_basebackup from node1.
+## smdw adopts the standby created by `make_cluster` (gpinitstandby). If its data_dir
+## is empty, e.g. after `patronictl reinit`, it is pg_basebackup'd from the leader.
 ## NOTE: it lives under the gpdemo datadirs, which `make create-demo-cluster` wipes --
 ## recreating the demo cluster also removes this node's data directory.
 
@@ -28,7 +24,7 @@ etcd3:
   # `etcd` service of docker-compose-greengage.yml
   host: etcd:2379
 
-# Keep in sync with patroni.yaml, see the comment there.
+# Keep in sync with mdw.yml, see the comment there.
 greengage: {}
 
 bootstrap:
@@ -46,13 +42,13 @@ postgresql:
   data_dir: /home/gpadmin/gpdb_src/gpAux/gpdemo/datadirs/standby/
   # GPHOME of the unpacked bin_gpdb.tar.gz
   bin_dir: /usr/local/greengage-db-devel/bin
-  # separate from node1's pgpass: both nodes share the container's /tmp
+  # separate from mdw's pgpass: both nodes share the container's /tmp
   pgpass: /tmp/pgpass1
 
-  # Keep in sync with patroni.yaml -- whichever node is the leader serves the
+  # Keep in sync with mdw.yml -- whichever node is the leader serves the
   # replication connection, so both need the `replicator` entry.
   # Patroni rewrites pg_hba.conf from this list on every start and on SIGHUP;
-  # bootstrap.pg_hba would never be applied here (node2 is cloned, not initdb'd).
+  # bootstrap.pg_hba would never be applied here (smdw is adopted or cloned, not initdb'd).
   pg_hba:
     - local all all trust
     # gpstart/gpstop/gpstate and segment -> coordinator connections
@@ -82,10 +78,10 @@ postgresql:
       password: rewind_pass
       options: -c gp_role=utility
 
-  # See the note in patroni.yaml: the dbid for pg_basebackup is assigned when
+  # See the note in mdw.yml: the dbid for pg_basebackup is assigned when
   # the node is registered as the coordinator standby on the leader.
 
-  # See the note in patroni.yaml: GUCs Patroni manages itself live in DCS.
+  # See the note in mdw.yml: GUCs Patroni manages itself live in DCS.
   parameters:
     unix_socket_directories: '/tmp'
 

@@ -1,19 +1,12 @@
-## Patroni config for node1.
+## Patroni config for mdw, the coordinator of the gpdemo cluster.
 ## Meant to be used inside the `greengage` container of docker-compose-greengage.yml,
-## where this repository is mounted at /home/gpadmin/patroni.
+## where this repository is mounted at /home/gpadmin/patroni. See README.md in this
+## directory for the complete setup.
 ##
-## Prerequisites inside the container (as gpadmin):
-##   # unpack GPHOME (the image ships bin_gpdb.tar.gz only)
-##   source /home/gpadmin/gpdb_src/concourse/scripts/common.bash
-##   install_gpdb
-##   /home/gpadmin/gpdb_src/concourse/scripts/setup_gpadmin_user.bash 
-##   make_cluster
+## Run (as gpadmin, before smdw.yml):
+##   python3 -m patroni ~/patroni/docker/greengage/mdw.yml
 ##
-## Run:
-##   cd /home/gpadmin/patroni
-##   python3 patroni.py patroni.yaml
-##
-## node1 adopts the existing gpdemo coordinator, so the `bootstrap` section below is
+## mdw adopts the existing gpdemo coordinator, so the `bootstrap` section below is
 ## only used if its data_dir is empty.
 
 scope: test-cluster
@@ -57,7 +50,8 @@ postgresql:
   # Patroni rewrites pg_hba.conf from this list on every start and on SIGHUP.
   # It has to live here rather than under `bootstrap`: bootstrap.pg_hba is only
   # applied when Patroni initdb's an empty data_dir, which never happens in this
-  # setup (node1 adopts the running gpdemo coordinator, node2 is pg_basebackup'd).
+  # setup (both nodes adopt the running gpdemo coordinators, a re-created node is
+  # pg_basebackup'd).
   # NB: the file is replaced wholesale, so the gpadmin entries that the Greengage
   # utilities rely on have to be repeated here.
   pg_hba:
@@ -102,7 +96,7 @@ postgresql:
   # NB: parameters from the CMDLINE_OPTIONS list (max_connections,
   # max_prepared_transactions, max_locks_per_transaction, max_worker_processes,
   # wal_keep_size, ...) are silently ignored here, they are managed in DCS:
-  #   patronictl -c patroni.yaml edit-config test-cluster --force \
+  #   patronictl -c ~/patroni/docker/greengage/mdw.yml edit-config test-cluster --force \
   #       -p max_connections=150 -p max_prepared_transactions=250
   parameters:
     unix_socket_directories: '/tmp'

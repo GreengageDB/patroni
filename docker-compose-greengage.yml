@@ -13,7 +13,8 @@
 ##   docker compose -f docker-compose-greengage.yml exec greengage bash
 ##
 ## Inside the greengage container this repository is mounted at /home/gpadmin/patroni;
-## patroni.yaml / standby.yaml then have to point at `etcd3: host: etcd:2379`.
+## the Patroni configs docker/greengage/mdw.yml and smdw.yml point at `etcd3: host: etcd:2379`.
+## See docker/greengage/README.md for the complete setup.
 
 name: patroni-greengage
 
@@ -40,7 +41,7 @@ services:
       - --initial-cluster-token=patroni-poc
       - --initial-cluster-state=new
     ports:
-      # expose etcd to the host as well (patroni.yaml: etcd3.host 127.0.0.1:2379)
+      # expose etcd to the host as well (Patroni outside the container: etcd3.host 127.0.0.1:2379)
       - "2379:2379"
       - "2380:2380"
     volumes:
@@ -70,7 +71,7 @@ services:
     volumes:
       - .:/home/gpadmin/patroni
     ports:
-      # Patroni REST API and Greengage ports taken from patroni.yaml / standby.yaml
+      # Patroni REST API and Greengage ports taken from docker/greengage/mdw.yml and smdw.yml
       - "8008:8008"
       - "8009:8009"
       - "7000:7000"
