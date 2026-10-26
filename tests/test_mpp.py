@@ -102,14 +102,20 @@ class TestMPP(BaseTestPostgresql):
         config = {'greengage': {}, 'postgresql': {'authentication': {'superuser': utility}}}
         self.assertIsInstance(get_mpp(config), Greengage)
         config['postgresql']['authentication']['rewind'] = {'username': 'bar'}
-        self.assertRaisesRegex(ConfigParseError, 'for the rewind in', get_mpp, config)
+        self.assertRaisesRegex(ConfigParseError, r'in postgresql\.authentication\.rewind: in dispatch mode',
+                               get_mpp, config)
         config['postgresql']['authentication']['rewind']['options'] = '--gp_role=utility'
         self.assertIsInstance(get_mpp(config), Greengage)
         # the last gp_role wins
         config['postgresql']['authentication']['superuser'] = {'options': '-c gp_role=utility -cgp_role=dispatch'}
-        self.assertRaisesRegex(ConfigParseError, 'for the superuser in', get_mpp, config)
+        self.assertRaisesRegex(ConfigParseError, r'in postgresql\.authentication\.superuser: in dispatch mode',
+                               get_mpp, config)
+        config['postgresql']['authentication']['rewind'] = {'username': 'bar'}
+        self.assertRaisesRegex(ConfigParseError, r'in postgresql\.authentication\.superuser and '
+                               r'postgresql\.authentication\.rewind: in dispatch mode', get_mpp, config)
         config['postgresql']['authentication'] = {}
-        self.assertRaisesRegex(ConfigParseError, 'for the superuser in', get_mpp, config)
+        self.assertRaisesRegex(ConfigParseError, r'in postgresql\.authentication\.superuser: in dispatch mode',
+                               get_mpp, config)
         self.assertIsNone(get_gp_role(None))
         self.assertIsNone(get_gp_role('-c work_mem=1MB'))
 

@@ -91,9 +91,10 @@ class Greengage(AbstractMPP):
         users = ['superuser'] + (['rewind'] if authentication.get('rewind') else [])
         wrong = [user for user in users if get_gp_role((authentication.get(user) or {}).get('options')) != 'utility']
         if wrong:
-            raise ConfigParseError('Greengage requires `options: {0}` for the {1} in the `postgresql.authentication`'
-                                   ' section: connections to the coordinator must be utility mode ones'
-                                   .format(UTILITY_MODE, ' and '.join(wrong)))
+            raise ConfigParseError('Greengage requires `options: {0}` in {1}: in dispatch mode connections to a standby'
+                                   ' coordinator fail and pg_rewind silently produces a broken data directory'
+                                   .format(UTILITY_MODE,
+                                           ' and '.join('postgresql.authentication.' + user for user in wrong)))
 
     def is_enabled(self) -> bool:
         """Check whether this node is a part of the MPP cluster from the Patroni point of view.
@@ -191,7 +192,7 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
     def _local_address(self) -> Tuple[str, int, str]:
         """:returns: host, port and data directory under which this node is known to the cluster."""
         config = self._postgresql.config
-        port = split_host_port(config.get('listen') or '', 5432)[1]
+        port = int(config.local_replication_address['port'])  # the port Patroni starts postgres with
         host = split_host_port(config.get('connect_address') or config.get('listen') or '', port)[0]
         return host, port, os.path.normpath(self._postgresql.data_dir)
 

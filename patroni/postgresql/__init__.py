@@ -98,6 +98,8 @@ class Postgresql(ClusterSite):
         self._connection = self.connection_pool.get('heartbeat')
         self.mpp_handler = mpp.get_handler_impl(self)
         self._bin_dir = config.get('bin_dir') or ''
+        # cached here, because pgcommand() is already used while the ConfigHandler below is being constructed
+        # (to get the GUCs available in this Postgres server), i.e. before self.config is set
         self._bin_name = config.get('bin_name') or EMPTY_DICT
         self._role_lock = Lock()
         self.set_role(PostgresqlRole.UNINITIALIZED)
