@@ -12,6 +12,10 @@ updates the catalog itself: the row of the old coordinator is removed and the ro
 replicate from the leader it registers itself there as the coordinator standby (the way ``gpinitstandby`` does it)
 and makes sure that its ``gp_dbid`` matches the dbid assigned in the catalog. Otherwise the next promotion of the
 node wouldn't find its row.
+
+Only Greengage 7 (based on PostgreSQL 12) is supported, it was tested with 7.5.0. Greengage 6, based on PostgreSQL
+9.4, is not: it predates the renaming of "master" to "coordinator", which the catalog functions used here, such as
+``gp_add_coordinator_standby()``, rely on (Greengage 7 keeps the old names only as aliases), and it was never tested.
 """
 import logging
 import os

@@ -85,6 +85,9 @@ postgresql:
   parameters:
     unix_socket_directories: '/tmp'
 
+# Greengage supports only one coordinator standby, hence only mdw and smdw may be
+# promoted. Any additional member of this Patroni cluster needs `nofailover: true`:
+# Greengage wouldn't update gp_segment_configuration on its promotion.
 tags:
   nofailover: false
   noloadbalance: false

@@ -8,7 +8,13 @@ standby coordinator (`smdw`) of a Greengage demo cluster:
 * `mdw.yml` and `smdw.yml` in this directory are the Patroni configs of the two
   coordinators.
 
-It is meant for development and testing only.
+It is meant for development and testing only. Only Greengage 7 is supported, the
+container uses `ggdb7_ubuntu:7.5.0`.
+
+Greengage supports only one coordinator standby, therefore exactly two Patroni members
+may be promoted. Any additional member needs `nofailover: true` in its `tags`, otherwise
+its promotion leaves Greengage's catalog wrong, see the Greengage section of
+`docs/yaml_configuration.rst`.
 
 Steps (from the repository root):
 

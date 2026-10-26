@@ -102,9 +102,14 @@ Enables integration of Patroni with the coordinator of a `Greengage DB <https://
 
     greengage: {}
 
+Only Greengage 7 is supported. Greengage 6 is not: it predates the renaming of "master" to "coordinator" in the catalog functions Patroni calls, e.g. ``gp_add_coordinator_standby()``.
+
 When enabled, Patroni starts the coordinator with ``--gp_role=dispatch`` and makes sure that GUCs which Greengage can't work without (``max_locks_per_transaction``, ``max_worker_processes``, ``max_prepared_transactions``) are not set lower than Greengage requires. All connections Patroni opens to the coordinator must be utility mode connections, therefore ``options: -c gp_role=utility`` has to be set for every user in the :ref:`postgresql.authentication <postgresql_settings>` section. Patroni refuses to start if it isn't set for the superuser or, if configured, for the rewind user: a dispatch mode connection fails on a standby whose dbid isn't yet in the replicated catalog, and ``pg_rewind`` silently produces a broken data directory.
 
 Greengage keeps the coordinators in ``gp_segment_configuration`` and on promotion of the standby removes the row of the old coordinator. Therefore, before a node starts to replicate from the leader, Patroni registers it there as the coordinator standby with ``gp_add_coordinator_standby()`` and writes the dbid assigned by the catalog as ``gp_dbid`` to ``internal.auto.conf`` of the node. When a new replica is created with ``pg_basebackup``, it is registered beforehand and the dbid is passed as ``--target-gp-dbid``, hence the option can't be set in :ref:`postgresql.basebackup <postgresql_settings>`. Greengage's ``pg_basebackup`` reads settings of the source server, so the replication user needs ``GRANT pg_read_all_settings TO <replication user>``.
+
+.. warning::
+    Greengage supports only one coordinator standby, therefore a Patroni cluster of Greengage coordinators must consist of exactly two members that can be promoted. Any additional member has to be configured with ``nofailover: true`` in the :ref:`tags <tags_settings>` section: it can't be registered as the standby, and if Patroni promoted it, Greengage wouldn't update its catalog: the promotion fails with ``gp_activate_standby can only be run on the standby coordinator``, Patroni then starts postgres again as the primary, and ``gp_segment_configuration`` keeps listing the previous coordinator as the primary one. The cluster seems to work, but Greengage utilities and the next promotion rely on the wrong catalog. For the same reason a node whose registration failed (Patroni logs an error starting with ``Greengage:``) must not be promoted until it is registered, which happens on its next start as a replica.
 
 .. note::
     Unlike Citus, Greengage segments are not managed by Patroni, hence there are no groups and the layout of the keys in DCS is the same as for a standalone PostgreSQL cluster.
