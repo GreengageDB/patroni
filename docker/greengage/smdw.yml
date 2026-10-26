@@ -35,6 +35,12 @@ bootstrap:
     maximum_lag_on_failover: 1048576
     postgresql:
       use_pg_rewind: true
+      # Keep in sync with mdw.yml, see the comment there.
+      parameters:
+        max_connections: 150
+        max_prepared_transactions: 250
+        max_locks_per_transaction: 128
+        max_worker_processes: 13
 
 postgresql:
   listen: 0.0.0.0:7001
@@ -83,7 +89,7 @@ postgresql:
   # See the note in mdw.yml: the dbid for pg_basebackup is assigned when
   # the node is registered as the coordinator standby on the leader.
 
-  # See the note in mdw.yml: GUCs Patroni manages itself live in DCS.
+  # See the note in mdw.yml: GUCs Patroni manages itself live in DCS, see bootstrap.dcs above.
   parameters:
     unix_socket_directories: '/tmp'
 

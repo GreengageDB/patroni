@@ -25,8 +25,9 @@ etcd3:
   host: etcd:2379
 
 # Enables the Greengage specifics: the coordinator is started with
-# --gp_role=dispatch and the GUCs Greengage can't work without are raised to
-# its own minimums. The section has no settings, its mere presence is the switch.
+# --gp_role=dispatch and max_prepared_transactions is never 0 (if not configured,
+# it is set to max_connections). The section has no settings, its mere presence
+# is the switch.
 greengage: {}
 
 bootstrap:
@@ -37,6 +38,19 @@ bootstrap:
     maximum_lag_on_failover: 1048576
     postgresql:
       use_pg_rewind: true
+      # GUCs from Patroni's CMDLINE_OPTIONS live only here (i.e. in DCS), they are
+      # ignored in `postgresql.parameters` below. Without them Patroni would start
+      # the coordinator with its own defaults, e.g. max_connections=100, instead of
+      # the values the gpdemo cluster was created with. bootstrap.dcs is written to
+      # DCS only once, by the first member, later changes need `patronictl edit-config`.
+      parameters:
+        max_connections: 150
+        max_prepared_transactions: 250
+        # Greengage defaults, Patroni's are 64 and 8. The default of
+        # max_worker_processes is 8 + MaxPMAuxProc: 12, or 13 if Greengage is
+        # built with --enable-ic-proxy, as the ggdb7_ubuntu image is.
+        max_locks_per_transaction: 128
+        max_worker_processes: 13
 
 postgresql:
   listen: 0.0.0.0:7000
@@ -96,9 +110,8 @@ postgresql:
 
   # NB: parameters from the CMDLINE_OPTIONS list (max_connections,
   # max_prepared_transactions, max_locks_per_transaction, max_worker_processes,
-  # wal_keep_size, ...) are silently ignored here, they are managed in DCS:
-  #   patronictl -c ~/patroni/docker/greengage/mdw.yml edit-config test-cluster --force \
-  #       -p max_connections=150 -p max_prepared_transactions=250
+  # wal_keep_size, ...) are silently ignored here, they are managed in DCS, see
+  # bootstrap.dcs above.
   parameters:
     unix_socket_directories: '/tmp'
 

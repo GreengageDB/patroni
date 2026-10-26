@@ -87,15 +87,18 @@ export PATH=$PATH:/home/gpadmin/.local/bin/
 # win the race and Patroni promotes the standby. One log file per node.
 python3 -m patroni docker/greengage/mdw.yml > /home/gpadmin/gpAdminLogs/patroni-mdw.log 2>&1 &
 until patronictl -c docker/greengage/mdw.yml list -f json | grep -q '"Member": "mdw".*"Role": "Leader"'; do sleep 1; done
+
+# Stop the standby, so that Patroni starts it itself with the parameters from DCS.
+# A running standby would be adopted with its current values, and Patroni would
+# apply DCS only after the next change of the DCS configuration.
+pg_ctl -D /home/gpadmin/gpdb_src/gpAux/gpdemo/datadirs/standby stop -m fast
 python3 -m patroni docker/greengage/smdw.yml > /home/gpadmin/gpAdminLogs/patroni-smdw.log 2>&1 &
 
 
-# GUCs from Patroni's CMDLINE_OPTIONS are ignored in the yaml and live in DCS.
-# Use the gpdemo values, then restart both nodes (members are mdw/smdw) to apply
-# them and the other pending changes (cluster_name, listen_addresses, wal_log_hints).
-patronictl -c docker/greengage/mdw.yml edit-config test-cluster --force -p max_connections=150 -p max_prepared_transactions=250
+# Patroni adopted the coordinator started by gpstart, restart it (member mdw) to
+# apply the pending changes (cluster_name, listen_addresses, wal_log_hints and the
+# GUCs from bootstrap.dcs in mdw.yml, which live in DCS).
 patronictl -c docker/greengage/mdw.yml restart test-cluster mdw --force
-patronictl -c docker/greengage/mdw.yml restart test-cluster smdw --force
 
 patronictl -c docker/greengage/mdw.yml list
 ```

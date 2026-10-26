@@ -134,13 +134,6 @@ class Greengage(AbstractMPP):
 class GreengageHandler(Greengage, AbstractMPPHandler):
     """Greengage specific implementation of :class:`AbstractMPPHandler`."""
 
-    # GUCs for which Greengage uses values higher than the PostgreSQL defaults Patroni relies on. Setting them
-    # lower than that makes the coordinator refuse to start or fail to run distributed queries.
-    MIN_GUC_VALUES = {
-        'max_locks_per_transaction': 128,
-        'max_worker_processes': 13,
-    }
-
     def __init__(self, postgresql: 'Postgresql', config: Dict[str, Union[str, int]]) -> None:
         """Init method for :class:`GreengageHandler`.
 
@@ -323,16 +316,11 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
         """Adjust GUCs in the current PostgreSQL configuration.
 
         .. note::
-            Only the values that Greengage can't work without are enforced here. Everything else, for example
-            ``max_connections``, is left to the user, who is expected to configure it in the DCS.
+            Only prepared transactions, which distributed transactions can't work without, are enforced here.
+            Everything else is left to the user, who is expected to configure it in the DCS.
 
         :param parameters: dictionary of GUCs, with key as GUC name and the corresponding value as current GUC value.
         """
-        for name, minimum in self.MIN_GUC_VALUES.items():
-            value = parse_int(parameters.get(name))
-            if value is None or value < minimum:
-                parameters[name] = minimum
-
         # Greengage implements distributed transactions on top of two-phase commit, therefore prepared
         # transactions must be enabled. If not explicitly configured we deduce the value from max_connections,
         # the same way as it is done for Citus.

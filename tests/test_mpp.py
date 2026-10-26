@@ -84,17 +84,16 @@ class TestMPP(BaseTestPostgresql):
         self.assertFalse(handler.ignore_replication_slot({}))
         self.assertEqual(handler.cmdline_options(), ['--gp_role=dispatch'])
 
-        # Greengage minimums are enforced, bigger values are kept, max_prepared_transactions is deduced
-        parameters = {'max_locks_per_transaction': 64, 'max_worker_processes': 20,
+        # max_prepared_transactions is deduced, other GUCs are left to the user
+        parameters = {'max_locks_per_transaction': 64, 'max_worker_processes': 8,
                       'max_prepared_transactions': 0, 'max_connections': 150}
         handler.adjust_postgres_gucs(parameters)
-        self.assertEqual(parameters, {'max_locks_per_transaction': 128, 'max_worker_processes': 20,
+        self.assertEqual(parameters, {'max_locks_per_transaction': 64, 'max_worker_processes': 8,
                                       'max_prepared_transactions': 150, 'max_connections': 150})
-        # explicitly configured max_prepared_transactions is not touched, missing values get the minimums
+        # explicitly configured max_prepared_transactions is not touched
         parameters = {'max_prepared_transactions': '200', 'max_connections': '150'}
         handler.adjust_postgres_gucs(parameters)
-        self.assertEqual(parameters, {'max_locks_per_transaction': 128, 'max_worker_processes': 13,
-                                      'max_prepared_transactions': '200', 'max_connections': '150'})
+        self.assertEqual(parameters, {'max_prepared_transactions': '200', 'max_connections': '150'})
 
     def test_greengage_check_config(self):
         utility = {'username': 'foo', 'options': '-c statement_timeout=0 -c gp_role=utility'}
