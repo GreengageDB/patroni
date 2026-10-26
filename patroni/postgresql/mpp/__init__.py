@@ -55,6 +55,20 @@ class AbstractMPP(abc.ABC):
         :returns: ``True`` is config passes validation, otherwise ``False``.
         """
 
+    @staticmethod
+    def check_config(config: Union['Config', Dict[str, Any]]) -> None:
+        """Check whether the rest of the Patroni configuration is good for a given MPP.
+
+        .. note::
+            Unlike :meth:`validate_config`, gets the whole configuration, not only the MPP section, and is called
+            only if the MPP section passed :meth:`validate_config`. Does nothing by default.
+
+        :param config: object or dictionary with Patroni configuration.
+
+        :raises:
+            :exc:`~patroni.exceptions.ConfigParseError`: if the configuration is not suitable for the MPP.
+        """
+
     @property
     @abc.abstractmethod
     def group(self) -> Any:
@@ -349,5 +363,6 @@ def get_mpp(config: Union['Config', Dict[str, Any]]) -> AbstractMPP:
     """
     for name, mpp_class in iter_mpp_classes(config):
         if mpp_class.validate_config(config[name]):
+            mpp_class.check_config(config)
             return mpp_class(config[name])
     return Null()

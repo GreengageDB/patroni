@@ -3,9 +3,9 @@ import os
 from typing import Any
 from unittest.mock import patch
 
-from patroni.exceptions import PatroniException
+from patroni.exceptions import ConfigParseError, PatroniException
 from patroni.postgresql.mpp import AbstractMPP, get_mpp, Null
-from patroni.postgresql.mpp.greengage import Greengage
+from patroni.postgresql.mpp.greengage import get_gp_role, Greengage
 
 from . import BaseTestPostgresql
 from .test_ha import get_cluster_initialized_with_leader
@@ -93,6 +93,25 @@ class TestMPP(BaseTestPostgresql):
         handler.adjust_postgres_gucs(parameters)
         self.assertEqual(parameters, {'max_locks_per_transaction': 128, 'max_worker_processes': 13,
                                       'max_prepared_transactions': '200', 'max_connections': '150'})
+
+    def test_greengage_check_config(self):
+        utility = {'username': 'foo', 'options': '-c statement_timeout=0 -c gp_role=utility'}
+        # nothing to check without the postgresql section, e.g. in the patronictl configuration
+        self.assertIsInstance(get_mpp({'greengage': {}}), Greengage)
+        # the superuser is required to use utility mode, the rewind user only if it is configured
+        config = {'greengage': {}, 'postgresql': {'authentication': {'superuser': utility}}}
+        self.assertIsInstance(get_mpp(config), Greengage)
+        config['postgresql']['authentication']['rewind'] = {'username': 'bar'}
+        self.assertRaisesRegex(ConfigParseError, 'for the rewind in', get_mpp, config)
+        config['postgresql']['authentication']['rewind']['options'] = '--gp_role=utility'
+        self.assertIsInstance(get_mpp(config), Greengage)
+        # the last gp_role wins
+        config['postgresql']['authentication']['superuser'] = {'options': '-c gp_role=utility -cgp_role=dispatch'}
+        self.assertRaisesRegex(ConfigParseError, 'for the superuser in', get_mpp, config)
+        config['postgresql']['authentication'] = {}
+        self.assertRaisesRegex(ConfigParseError, 'for the superuser in', get_mpp, config)
+        self.assertIsNone(get_gp_role(None))
+        self.assertIsNone(get_gp_role('-c work_mem=1MB'))
 
     @patch('patroni.postgresql.mpp.greengage.get_connection_cursor')
     def test_greengage_standby_registration(self, mock_get_cursor):

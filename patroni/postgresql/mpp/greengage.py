@@ -15,21 +15,41 @@ node wouldn't find its row.
 """
 import logging
 import os
+import re
 
 from typing import Any, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 
 from ...dcs import Cluster, Leader, Member
+from ...exceptions import ConfigParseError
 from ...utils import parse_int, split_host_port
 from ..connection import get_connection_cursor
 from . import AbstractMPP, AbstractMPPHandler
 
 if TYPE_CHECKING:  # pragma: no cover
+    from ...config import Config
     from .. import Postgresql
 
 logger = logging.getLogger(__name__)
 
 # Greengage keeps gp_dbid there, the file isn't touched by pg_rewind and is written by pg_basebackup
 INTERNAL_AUTO_CONF = 'internal.auto.conf'
+
+# libpq `options` for a utility mode connection to the coordinator
+UTILITY_MODE = '-c gp_role=utility'
+
+# `-c gp_role=X`, `-cgp_role=X` or `--gp_role=X` in the libpq `options`
+_GP_ROLE_RE = re.compile(r'(?:^|\s)(?:-c\s*|--)gp_role=(\S+)')
+
+
+def get_gp_role(options: Optional[str]) -> Optional[str]:
+    """Get ``gp_role`` set in the libpq *options*.
+
+    :param options: value of the libpq ``options`` connection parameter.
+
+    :returns: the last ``gp_role`` value set in *options*, the one that takes effect, or ``None``.
+    """
+    roles = _GP_ROLE_RE.findall(options or '')
+    return roles[-1] if roles else None
 
 
 class Greengage(AbstractMPP):
@@ -44,6 +64,36 @@ class Greengage(AbstractMPP):
         :returns: ``True`` if config passes validation, otherwise ``False``.
         """
         return config is None or isinstance(config, dict)
+
+    @staticmethod
+    def check_config(config: Union['Config', Dict[str, Any]]) -> None:
+        """Check that connections Patroni opens to the coordinator are utility mode ones.
+
+        .. note::
+            A dispatch mode connection to the coordinator can't be relied upon: on a standby, whose dbid isn't
+            yet in the replicated ``gp_segment_configuration``, it fails with "cannot locate entry database", and
+            ``pg_rewind`` silently produces a broken data directory, because the temporary table it creates is
+            distributed and the files are then read on the segments. Therefore ``-c gp_role=utility`` is required
+            in the ``options`` of the superuser, used for the local connections, and of the rewind user, if it is
+            configured (otherwise ``pg_rewind`` uses the superuser). Replication connections don't depend on
+            ``gp_role``.
+
+        :param config: object or dictionary with Patroni configuration. Nothing is checked if it doesn't have the
+            ``postgresql`` section, e.g. a configuration of ``patronictl``.
+
+        :raises:
+            :exc:`~patroni.exceptions.ConfigParseError`: if the superuser or the rewind user don't use utility mode.
+        """
+        postgresql = config.get('postgresql')
+        if not isinstance(postgresql, dict):
+            return
+        authentication = postgresql.get('authentication') or {}
+        users = ['superuser'] + (['rewind'] if authentication.get('rewind') else [])
+        wrong = [user for user in users if get_gp_role((authentication.get(user) or {}).get('options')) != 'utility']
+        if wrong:
+            raise ConfigParseError('Greengage requires `options: {0}` for the {1} in the `postgresql.authentication`'
+                                   ' section: connections to the coordinator must be utility mode ones'
+                                   .format(UTILITY_MODE, ' and '.join(wrong)))
 
     def is_enabled(self) -> bool:
         """Check whether this node is a part of the MPP cluster from the Patroni point of view.
