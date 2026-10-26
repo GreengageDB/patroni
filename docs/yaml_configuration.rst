@@ -111,6 +111,15 @@ Greengage keeps the coordinators in ``gp_segment_configuration`` and on promotio
 .. warning::
     Greengage supports only one coordinator standby, therefore a Patroni cluster of Greengage coordinators must consist of exactly two members that can be promoted. Any additional member has to be configured with ``nofailover: true`` in the :ref:`tags <tags_settings>` section: it can't be registered as the standby, and if Patroni promoted it, Greengage wouldn't update its catalog: the promotion fails with ``gp_activate_standby can only be run on the standby coordinator``, Patroni then starts postgres again as the primary, and ``gp_segment_configuration`` keeps listing the previous coordinator as the primary one. The cluster seems to work, but Greengage utilities and the next promotion rely on the wrong catalog. For the same reason a node whose registration failed (Patroni logs an error starting with ``Greengage:``) must not be promoted until it is registered, which happens on its next start as a replica.
 
+.. warning::
+    Patroni manages ``pg_hba.conf`` of the coordinators only. The segments must accept connections from every host that can become the coordinator, otherwise the new coordinator can't dispatch queries after a promotion. ``gpinitsystem`` and ``gpinitstandby`` add the entries for the hosts they set up, for the latter one line per address of the standby host in ``pg_hba.conf`` of every primary and mirror segment:
+
+    .. code::
+
+        host  all  gpadmin  192.0.2.10/32  trust
+
+    If a coordinator is moved to a host that wasn't set up with ``gpinitsystem`` or ``gpinitstandby``, e.g. re-created there by Patroni with ``pg_basebackup``, such entries have to be added to all segments manually, followed by ``gpstop -u``.
+
 .. note::
     Unlike Citus, Greengage segments are not managed by Patroni, hence there are no groups and the layout of the keys in DCS is the same as for a standalone PostgreSQL cluster.
 

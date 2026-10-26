@@ -16,6 +16,11 @@ may be promoted. Any additional member needs `nofailover: true` in its `tags`, o
 its promotion leaves Greengage's catalog wrong, see the Greengage section of
 `docs/yaml_configuration.rst`.
 
+Patroni doesn't change `pg_hba.conf` of the segments. In this setup all instances run on
+one host, which the segments already accept. On a multi-host cluster every host that can
+become the coordinator must be allowed in `pg_hba.conf` of all segments, as `gpinitstandby`
+does it, see the same section.
+
 Steps (from the repository root):
 
 ```
