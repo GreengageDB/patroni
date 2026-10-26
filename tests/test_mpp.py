@@ -131,35 +131,35 @@ class TestMPP(BaseTestPostgresql):
 
         # the leader is still in recovery
         cur.fetchone.side_effect = [(True,)]
-        self.assertIsNone(handler.register_standby(leader))
+        self.assertIsNone(handler._register_standby(leader))
 
         # the connection is a utility mode one: options of the superuser are passed to get_connection_cursor()
         self.p.config.superuser['options'] = '-c gp_role=utility'
         cur.fetchone.side_effect = [(False,), registered]
-        self.assertEqual(handler.register_standby(leader), 8)
+        self.assertEqual(handler._register_standby(leader), 8)
         self.assertEqual(mock_get_cursor.call_args[1]['options'], '-c gp_role=utility')
 
         # another standby is registered already, we don't replace it
         cur.fetchone.side_effect = [(False,), (8, 'other', 'other', 5432, '/data')]
-        self.assertIsNone(handler.register_standby(leader))
+        self.assertIsNone(handler._register_standby(leader))
         # the same host and port, but a different data directory: a different standby as well
         cur.fetchone.side_effect = [(False,), (8, 'mdw', '127.0.0.2', 5432, '/data')]
-        self.assertIsNone(handler.register_standby(leader))
+        self.assertIsNone(handler._register_standby(leader))
         # registered by the host name, which matches connect_address, while the address is an IP
         cur.fetchone.side_effect = [(False,), (8, '127.0.0.2', '10.0.0.1', 5432, self.p.data_dir)]
-        self.assertEqual(handler.register_standby(leader), 8)
+        self.assertEqual(handler._register_standby(leader), 8)
         cur.fetchone.side_effect = [(False,), (8, 'other', 'other', 5432, '/data')]
-        self.assertIsNone(handler.register_standby(leader))
+        self.assertIsNone(handler._register_standby(leader))
 
         # no standby, register this node
         cur.fetchone.side_effect = [(False,), None, (9,)]
-        self.assertEqual(handler.register_standby(leader), 9)
+        self.assertEqual(handler._register_standby(leader), 9)
         cur.execute.assert_called_with('SELECT pg_catalog.gp_add_coordinator_standby(%s, %s, %s, %s)',
                                        ('127.0.0.2', '127.0.0.2', self.p.data_dir, 5432))
 
         # the leader is unreachable
         mock_get_cursor.side_effect = Exception
-        self.assertIsNone(handler.register_standby(leader))
+        self.assertIsNone(handler._register_standby(leader))
         self.assertIsNone(handler.basebackup_options(leader))
         self.assertIsNone(handler.basebackup_options(None))
         mock_get_cursor.side_effect = None
@@ -168,15 +168,15 @@ class TestMPP(BaseTestPostgresql):
         cur.fetchone.side_effect = [(True,)]
         handler.before_follow(leader)
         self.assertFalse(os.path.exists(internal_auto_conf))
-        self.assertIsNone(handler.get_local_dbid())
+        self.assertIsNone(handler._get_local_dbid())
 
         # gp_dbid is written if it is missing, other settings in the file are kept
         cur.fetchone.side_effect = [(False,), registered]
         handler.before_follow(leader)
-        self.assertEqual(handler.get_local_dbid(), 8)
+        self.assertEqual(handler._get_local_dbid(), 8)
         with open(internal_auto_conf, 'w') as f:
             f.write("foo = 'bar'\ngp_dbid='1'\n")
-        self.assertEqual(handler.get_local_dbid(), 1)
+        self.assertEqual(handler._get_local_dbid(), 1)
         cur.fetchone.side_effect = [(False,), registered]
         with patch('patroni.postgresql.mpp.greengage.fsync_dir') as mock_fsync_dir:
             handler.before_follow(leader)
@@ -189,7 +189,7 @@ class TestMPP(BaseTestPostgresql):
 
         # gp_dbid matches, nothing to do
         cur.fetchone.side_effect = [(False,), registered]
-        with patch.object(handler, 'set_local_dbid') as mock_set_local_dbid:
+        with patch.object(handler, '_set_local_dbid') as mock_set_local_dbid:
             handler.before_follow(leader)
             mock_set_local_dbid.assert_not_called()
 

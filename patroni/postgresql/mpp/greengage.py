@@ -195,7 +195,7 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
         host = split_host_port(config.get('connect_address') or config.get('listen') or '', port)[0]
         return host, port, os.path.normpath(self._postgresql.data_dir)
 
-    def get_local_dbid(self) -> Optional[int]:
+    def _get_local_dbid(self) -> Optional[int]:
         """:returns: ``gp_dbid`` from ``internal.auto.conf`` of this node, or ``None`` if it couldn't be read."""
         try:
             with open(self._internal_auto_conf) as f:
@@ -206,7 +206,7 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
         except Exception as e:
             logger.warning('Failed to read gp_dbid from %s: %r', self._internal_auto_conf, e)
 
-    def set_local_dbid(self, dbid: int) -> None:
+    def _set_local_dbid(self, dbid: int) -> None:
         """Write *dbid* as ``gp_dbid`` to ``internal.auto.conf`` of this node, keeping the rest of the file."""
         lines = []
         if os.path.exists(self._internal_auto_conf):
@@ -251,7 +251,7 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
                     host, port, data_dir, dbid)
         return dbid
 
-    def register_standby(self, leader: Union[Leader, Member]) -> Optional[int]:
+    def _register_standby(self, leader: Union[Leader, Member]) -> Optional[int]:
         """Make sure that this node is the coordinator standby of the *leader* in ``gp_segment_configuration``.
 
         :param leader: the primary coordinator.
@@ -281,13 +281,13 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
 
         :param leader: the member this node is going to replicate from.
         """
-        dbid = self.register_standby(leader)
+        dbid = self._register_standby(leader)
         if dbid is None:
             return
-        local_dbid = self.get_local_dbid()
+        local_dbid = self._get_local_dbid()
         if local_dbid != dbid:
             logger.info('Greengage: changing gp_dbid in %s from %s to %s', self._internal_auto_conf, local_dbid, dbid)
-            self.set_local_dbid(dbid)
+            self._set_local_dbid(dbid)
 
     def basebackup_options(self, leader: Optional[Leader]) -> Optional[List[str]]:
         """Additional command line options for ``pg_basebackup``.
@@ -306,7 +306,7 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
         :returns: a list with the ``--target-gp-dbid`` and ``--no-verify-checksums`` options, or ``None`` if the node
             couldn't be registered.
         """
-        dbid = self.register_standby(leader) if leader else None
+        dbid = self._register_standby(leader) if leader else None
         if dbid is None:
             logger.error('Greengage: no dbid for the new coordinator standby, pg_basebackup is not possible')
             return None
