@@ -20,6 +20,7 @@ Only Greengage 7 (based on PostgreSQL 12) is supported, it was tested with 7.5.0
 import logging
 import os
 import re
+import time
 
 from typing import Any, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 
@@ -42,6 +43,9 @@ INTERNAL_AUTO_CONF = 'internal.auto.conf'
 
 # libpq `options` for a utility mode connection to the coordinator
 UTILITY_MODE = '-c gp_role=utility'
+
+# how long to wait for the leader to finish its promotion before giving up the standby registration
+PROMOTION_TIMEOUT = 30
 
 # `-c gp_role=X`, `-cgp_role=X` or `--gp_role=X` in the libpq `options`
 _GP_ROLE_RE = re.compile(r'(?:^|\s)(?:-c\s*|--)gp_role=(\S+)')
@@ -83,6 +87,9 @@ class Greengage(AbstractMPP):
             in the ``options`` of the superuser, used for the local connections, and of the rewind user, if it is
             configured (otherwise ``pg_rewind`` uses the superuser). Replication connections don't depend on
             ``gp_role``.
+
+            The check is called only when the DCS object is created, i.e. when Patroni starts, and not when the
+            configuration is reloaded.
 
         :param config: object or dictionary with Patroni configuration. Nothing is checked if it doesn't have the
             ``postgresql`` section, e.g. a configuration of ``patronictl``.
@@ -188,12 +195,17 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
     def _internal_auto_conf(self) -> str:
         return os.path.join(self._postgresql.data_dir, INTERNAL_AUTO_CONF)
 
-    def _local_address(self) -> Tuple[str, int, str]:
-        """:returns: host, port and data directory under which this node is known to the cluster."""
+    def _local_address(self) -> Optional[Tuple[str, int, str]]:
+        """:returns: host, port and absolute data directory under which this node is known to the cluster, or
+            ``None`` if ``connect_address`` isn't set: ``listen`` may be a wildcard or a list of addresses."""
         config = self._postgresql.config
+        connect_address = config.get('connect_address')
+        if not connect_address:
+            logger.error('Greengage: postgresql.connect_address is not set, the node can not be registered'
+                         ' as the coordinator standby')
+            return None
         port = int(config.local_replication_address['port'])  # the port Patroni starts postgres with
-        host = split_host_port(config.get('connect_address') or config.get('listen') or '', port)[0]
-        return host, port, os.path.normpath(self._postgresql.data_dir)
+        return split_host_port(connect_address, port)[0], port, os.path.abspath(self._postgresql.data_dir)
 
     def _get_local_dbid(self) -> Optional[int]:
         """:returns: ``gp_dbid`` from ``internal.auto.conf`` of this node, or ``None`` if it couldn't be read."""
@@ -225,11 +237,34 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
         os.rename(tmp, self._internal_auto_conf)
         fsync_dir(self._postgresql.data_dir)
 
+    def _wait_for_promotion(self, cur: Any) -> bool:
+        """Wait until the leader is out of recovery.
+
+        .. note::
+            The new leader takes the leader key before its promotion finishes, while the former primary starts to
+            follow it soon after a switchover. Until the promotion is over, the catalog of the leader still has the
+            row of the former primary, which the promotion is about to delete. Registering later would require a
+            restart, because ``gp_dbid`` is read only at postmaster start, and nothing would trigger it.
+
+        :param cur: cursor of a connection to the leader.
+
+        :returns: ``True`` if the leader isn't in recovery, ``False`` if it still is after :data:`PROMOTION_TIMEOUT`.
+        """
+        deadline = time.time() + PROMOTION_TIMEOUT
+        while True:
+            cur.execute('SELECT pg_catalog.pg_is_in_recovery()')
+            row = cur.fetchone()
+            if row and not row[0]:
+                return True
+            if time.time() >= deadline:
+                logger.warning('Greengage: the leader is still in recovery after %s seconds, not registering'
+                               ' the coordinator standby', PROMOTION_TIMEOUT)
+                return False
+            logger.info('Greengage: the leader is still in recovery, waiting for its promotion to finish')
+            time.sleep(1)
+
     def _register(self, cur: Any, host: str, port: int, data_dir: str) -> Optional[int]:
-        cur.execute('SELECT pg_catalog.pg_is_in_recovery()')
-        row = cur.fetchone()
-        if not row or row[0]:
-            logger.info('Greengage: the leader is still in recovery, postponing the standby registration')
+        if not self._wait_for_promotion(cur):
             return None
 
         cur.execute("SELECT dbid, hostname, address, port, datadir FROM pg_catalog.gp_segment_configuration"
@@ -258,7 +293,10 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
 
         :returns: dbid of this node in the catalog of the *leader*, or ``None`` if it could not be registered.
         """
-        host, port, data_dir = self._local_address()
+        address = self._local_address()
+        if not address:
+            return None
+        host, port, data_dir = address
         conn_kwargs = leader.conn_kwargs(self._postgresql.config.superuser)
         conn_kwargs.setdefault('dbname', self._postgresql.database)
         # gp_add_coordinator_standby() works only in utility mode, `-c gp_role=utility` is expected to come from
@@ -279,7 +317,8 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
             ``pg_rewind`` doesn't touch ``internal.auto.conf``, therefore the file of the former primary still
             has its old ``gp_dbid``, while its row has already been removed from the catalog by the promotion.
 
-        :param leader: the member this node is going to replicate from.
+        :param leader: the member this node is going to replicate from. It has to be the leader, the
+            ``replicatefrom`` tag isn't supported.
         """
         dbid = self._register_standby(leader)
         if dbid is None:

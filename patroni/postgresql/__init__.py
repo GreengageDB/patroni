@@ -30,7 +30,8 @@ from .callback_executor import CallbackAction, CallbackExecutor
 from .cancellable import CancellableSubprocess
 from .config import ConfigHandler, mtime
 from .connection import ConnectionPool, get_connection_cursor
-from .misc import parse_history, parse_lsn, postgres_major_version_to_int, PostgresqlRole, PostgresqlState
+from .misc import merge_options, parse_history, parse_lsn, postgres_major_version_to_int, PostgresqlRole, \
+    PostgresqlState
 from .mpp import AbstractMPP
 from .postmaster import PostmasterProcess
 from .slots import SlotsHandler
@@ -854,8 +855,11 @@ class Postgresql(ClusterSite):
     def checkpoint(self, connect_kwargs: Optional[Dict[str, Any]] = None,
                    timeout: Optional[float] = None) -> Optional[str]:
         check_not_is_in_recovery = connect_kwargs is not None
-        conn_kwargs = {**(connect_kwargs or self.connection_pool.conn_kwargs),
-                       'connect_timeout': timeout, 'options': '-c statement_timeout=0'}
+        conn_kwargs = connect_kwargs or self.connection_pool.conn_kwargs
+        # the options of the user are kept, e.g. `-c gp_role=utility`: in dispatch mode Greengage would
+        # dispatch CHECKPOINT to all segments
+        conn_kwargs = {**conn_kwargs, 'connect_timeout': timeout,
+                       'options': merge_options(conn_kwargs.get('options'), '-c statement_timeout=0')}
         try:
             with get_connection_cursor(**conn_kwargs) as cur:
                 if check_not_is_in_recovery:

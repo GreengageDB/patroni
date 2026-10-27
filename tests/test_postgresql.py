@@ -297,6 +297,10 @@ class TestPostgresql(BaseTestPostgresql):
         with patch.object(MockCursor, 'execute', Mock(return_value=None)):
             self.assertIsNone(self.p.checkpoint())
         self.assertEqual(self.p.checkpoint(timeout=10), 'not accessible or not healthy')
+        # the options of the user are kept, statement_timeout is appended
+        with patch('patroni.postgresql.get_connection_cursor') as mock_get_cursor:
+            self.p.checkpoint({'user': 'postgres', 'options': '-c gp_role=utility'})
+            self.assertEqual(mock_get_cursor.call_args[1]['options'], '-c gp_role=utility -c statement_timeout=0')
 
     @patch('patroni.postgresql.config.mtime', mock_mtime)
     @patch('patroni.postgresql.config.ConfigHandler._get_pg_settings')

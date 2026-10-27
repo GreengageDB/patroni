@@ -1254,12 +1254,12 @@ def get_postgres_version(bin_dir: Optional[str] = None, bin_name: str = 'postgre
         version = subprocess.check_output([binary, '--version']).decode()
     except OSError as e:
         raise PatroniException(f'Failed to get postgres version: {e}')
-    # The parenthesized part is the product name, which may consist of more than one word, e.g.
-    # "postgres (PostgreSQL) 15.2", "postgres (Greengage Database) 12.22", or be missing altogether.
-    version = re.match(r'^[^\s]+ (?:\(.+?\) )?((\d+)(\.\d+)*)', version)
-    if TYPE_CHECKING:  # pragma: no cover
-        assert version is not None
-    version = version.groups()  # e.g., ('15.2', '15', '.2')
+    # The product name may be parenthesized and consist of more than one word, e.g. "postgres (PostgreSQL) 15.2",
+    # "postgres (Greengage Database) 12.22", be a single word without parentheses, or be missing altogether.
+    match = re.match(r'^[^\s]+ (?:\(.+?\) |[^\s(]+ )?((\d+)(\.\d+)*)', version)
+    if not match:
+        raise PatroniException(f'Failed to parse postgres version: {version.strip()!r}')
+    version = match.groups()  # e.g., ('15.2', '15', '.2')
     major_version = int(version[1])
     dot_count = version[0].count('.')
     if major_version < 10 and dot_count < 2 or major_version >= 10 and dot_count < 1:

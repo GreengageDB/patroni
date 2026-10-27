@@ -126,18 +126,29 @@ class TestMPP(BaseTestPostgresql):
         leader = self.cluster.leader
         internal_auto_conf = os.path.join(self.p.data_dir, 'internal.auto.conf')
         cur = mock_get_cursor.return_value.__enter__.return_value
-        # how this node is known to the cluster: connect_address, port from listen, normalized data_dir
-        registered = (8, 'mdw', '127.0.0.2', 5432, self.p.data_dir + '/')
+        # how this node is known to the cluster: connect_address, port from listen, absolute data_dir (the one in
+        # the test config is relative)
+        data_dir = os.path.abspath(self.p.data_dir)
+        registered = (8, 'mdw', '127.0.0.2', 5432, data_dir + '/')
 
-        # the leader is still in recovery
-        cur.fetchone.side_effect = [(True,)]
-        self.assertIsNone(handler._register_standby(leader))
+        # the leader is still in recovery after the timeout
+        with patch('patroni.postgresql.mpp.greengage.time') as mock_time:
+            mock_time.time.side_effect = [0, 1, 31]
+            cur.fetchone.side_effect = [(True,), (True,)]
+            self.assertIsNone(handler._register_standby(leader))
+            mock_time.sleep.assert_called_once_with(1)
 
         # the connection is a utility mode one: options of the superuser are passed to get_connection_cursor()
         self.p.config.superuser['options'] = '-c gp_role=utility'
         cur.fetchone.side_effect = [(False,), registered]
         self.assertEqual(handler._register_standby(leader), 8)
         self.assertEqual(mock_get_cursor.call_args[1]['options'], '-c gp_role=utility')
+
+        # the leader finishes its promotion while we wait, e.g. right after a switchover
+        with patch('patroni.postgresql.mpp.greengage.time.sleep') as mock_sleep:
+            cur.fetchone.side_effect = [(True,), (False,), registered]
+            self.assertEqual(handler._register_standby(leader), 8)
+            mock_sleep.assert_called_once_with(1)
 
         # another standby is registered already, we don't replace it
         cur.fetchone.side_effect = [(False,), (8, 'other', 'other', 5432, '/data')]
@@ -146,14 +157,20 @@ class TestMPP(BaseTestPostgresql):
         cur.fetchone.side_effect = [(False,), (8, 'mdw', '127.0.0.2', 5432, '/data')]
         self.assertIsNone(handler._register_standby(leader))
         # registered by the host name, which matches connect_address, while the address is an IP
-        cur.fetchone.side_effect = [(False,), (8, '127.0.0.2', '10.0.0.1', 5432, self.p.data_dir)]
+        cur.fetchone.side_effect = [(False,), (8, '127.0.0.2', '10.0.0.1', 5432, data_dir)]
         self.assertEqual(handler._register_standby(leader), 8)
 
         # no standby, register this node
         cur.fetchone.side_effect = [(False,), None, (9,)]
         self.assertEqual(handler._register_standby(leader), 9)
         cur.execute.assert_called_with('SELECT pg_catalog.gp_add_coordinator_standby(%s, %s, %s, %s)',
-                                       ('127.0.0.2', '127.0.0.2', self.p.data_dir, 5432))
+                                       ('127.0.0.2', '127.0.0.2', data_dir, 5432))
+
+        # without connect_address the node can't be registered, listen may be a wildcard
+        with patch.dict(self.p.config._config, {'connect_address': None}):
+            mock_get_cursor.reset_mock()
+            self.assertIsNone(handler._register_standby(leader))
+            mock_get_cursor.assert_not_called()
 
         # the leader is unreachable
         mock_get_cursor.side_effect = Exception

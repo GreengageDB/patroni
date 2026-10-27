@@ -11,9 +11,10 @@ standby coordinator (`smdw`) of a Greengage demo cluster:
 It is meant for development and testing only. Only Greengage 7 is supported, the
 container uses `ggdb7_ubuntu:7.5.0`.
 
-Greengage supports only one coordinator standby, therefore exactly two Patroni members
-may be promoted. Any additional member needs `nofailover: true` in its `tags`, otherwise
-its promotion leaves Greengage's catalog wrong, see the Greengage section of
+Greengage supports only one coordinator standby, therefore the Patroni cluster must consist
+of exactly two members, and the `replicatefrom` tag isn't supported. Additional members,
+even with `nofailover: true`, can't be created with `pg_basebackup`, and the promotion of
+one leaves Greengage's catalog wrong, see the Greengage section of
 `docs/yaml_configuration.rst`.
 
 Patroni doesn't change `pg_hba.conf` of the segments. In this setup all instances run on
