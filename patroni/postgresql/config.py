@@ -655,7 +655,7 @@ class ConfigHandler(object):
         if not member or not member.conn_url or member.name == self._postgresql.name:
             return None
         ret = member.conn_kwargs(self.replication)
-        ret['application_name'] = self._postgresql.name
+        ret['application_name'] = self._postgresql.mpp_handler.replication_application_name()
         ret.setdefault('sslmode', 'prefer')
         if self._postgresql.major_version >= AUTH_ALLOWED_PARAMETERS_VERSIONS['gssencmode']:
             ret.setdefault('gssencmode', 'prefer')

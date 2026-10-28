@@ -193,6 +193,13 @@ class AbstractMPPHandler(AbstractMPP):
         :param parameters: dictionary of GUCs, with key as GUC name and the corresponding value as current GUC value.
         """
 
+    def replication_application_name(self) -> str:
+        """Return the application name used by the streaming replication connection.
+
+        :returns: the Patroni member name by default.
+        """
+        return self._postgresql.name
+
     def cmdline_options(self) -> List[str]:
         """Additional command line options for the ``postgres`` process.
 

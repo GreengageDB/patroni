@@ -91,14 +91,15 @@ class Greengage(AbstractMPP):
             The check is called only when the DCS object is created, i.e. when Patroni starts, and not when the
             configuration is reloaded.
 
-        :param config: object or dictionary with Patroni configuration. Nothing is checked if it doesn't have the
-            ``postgresql`` section, e.g. a configuration of ``patronictl``.
+        :param config: object or dictionary with Patroni configuration. Nothing is checked if it doesn't have
+            ``postgresql.data_dir``, e.g. a configuration of ``patronictl``. The ``postgresql`` section itself can't
+            be relied upon for that, because :class:`~patroni.config.Config` always fills it with the defaults.
 
         :raises:
             :exc:`~patroni.exceptions.ConfigParseError`: if the superuser or the rewind user don't use utility mode.
         """
         postgresql = config.get('postgresql')
-        if not isinstance(postgresql, dict):
+        if not isinstance(postgresql, dict) or not postgresql.get('data_dir'):
             return
         authentication = postgresql.get('authentication') or {}
         users = ['superuser'] + (['rewind'] if authentication.get('rewind') else [])
@@ -179,6 +180,16 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
         A Greengage cluster is created by ``gpinitsystem``, which Patroni can only run as a custom bootstrap method.
         """
 
+    def replication_application_name(self) -> str:
+        """Preserve Greengage's native coordinator synchronous replication behavior.
+
+        The coordinator's commit path only waits for a receiver identified by this exact name,
+        independently of ``synchronous_standby_names``.
+
+        :returns: Greengage's required WAL receiver application name.
+        """
+        return 'gp_walreceiver'
+
     def cmdline_options(self) -> List[str]:
         """Additional command line options for the ``postgres`` process.
 
@@ -204,8 +215,10 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
             logger.error('Greengage: postgresql.connect_address is not set, the node can not be registered'
                          ' as the coordinator standby')
             return None
-        port = int(config.local_replication_address['port'])  # the port Patroni starts postgres with
-        return split_host_port(connect_address, port)[0], port, os.path.abspath(self._postgresql.data_dir)
+        # both the host and the port are taken from connect_address: the one in listen is the port postgres is
+        # started with, which, e.g. behind NAT or port forwarding, isn't necessarily reachable from other hosts
+        host, port = split_host_port(connect_address, int(config.local_replication_address['port']))
+        return host, port, os.path.abspath(self._postgresql.data_dir)
 
     def _get_local_dbid(self) -> Optional[int]:
         """:returns: ``gp_dbid`` from ``internal.auto.conf`` of this node, or ``None`` if it couldn't be read."""
@@ -238,7 +251,7 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
         fsync_dir(self._postgresql.data_dir)
 
     def _wait_for_promotion(self, cur: Any) -> bool:
-        """Wait until the leader is out of recovery.
+        """Wait until the leader is the primary coordinator in its own catalog.
 
         .. note::
             The new leader takes the leader key before its promotion finishes, while the former primary starts to
@@ -246,21 +259,28 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
             row of the former primary, which the promotion is about to delete. Registering later would require a
             restart, because ``gp_dbid`` is read only at postmaster start, and nothing would trigger it.
 
+            ``pg_is_in_recovery()`` can't be relied upon for that: ``StartupXLOG()`` leaves recovery before
+            ``UpdateCatalogForStandbyPromotion()`` updates the catalog, hence the row of the leader itself is
+            checked, which gets ``role = 'p'`` in the same transaction that deletes the row of the former primary.
+
         :param cur: cursor of a connection to the leader.
 
-        :returns: ``True`` if the leader isn't in recovery, ``False`` if it still is after :data:`PROMOTION_TIMEOUT`.
+        :returns: ``True`` if the leader is the primary coordinator in its catalog, ``False`` if it still isn't
+            after :data:`PROMOTION_TIMEOUT`.
         """
         deadline = time.time() + PROMOTION_TIMEOUT
         while True:
-            cur.execute('SELECT pg_catalog.pg_is_in_recovery()')
+            cur.execute("SELECT role = 'p' FROM pg_catalog.gp_segment_configuration"
+                        " WHERE content = -1 AND dbid = pg_catalog.current_setting('gp_dbid')::int")
             row = cur.fetchone()
-            if row and not row[0]:
+            if row and row[0]:
                 return True
             if time.time() >= deadline:
-                logger.warning('Greengage: the leader is still in recovery after %s seconds, not registering'
-                               ' the coordinator standby', PROMOTION_TIMEOUT)
+                logger.warning('Greengage: the leader is still not the primary coordinator in its catalog after %s'
+                               ' seconds, not registering the coordinator standby', PROMOTION_TIMEOUT)
                 return False
-            logger.info('Greengage: the leader is still in recovery, waiting for its promotion to finish')
+            logger.info('Greengage: the leader is not the primary coordinator in its catalog yet, waiting for its'
+                        ' promotion to finish')
             time.sleep(1)
 
     def _register(self, cur: Any, host: str, port: int, data_dir: str) -> Optional[int]:
@@ -298,6 +318,13 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
             return None
         host, port, data_dir = address
         conn_kwargs = leader.conn_kwargs(self._postgresql.config.superuser)
+        if not conn_kwargs.get('host'):
+            # Member.conn_kwargs() returns {} if the leader doesn't announce a conn_url, e.g. when the leader key
+            # outlives the member key in DCS. libpq would then connect to its built-in defaults, possibly to an
+            # entirely different postgres, where the standby must not be registered.
+            logger.error('Greengage: the leader %s has no connection address, can not register the coordinator'
+                         ' standby', leader.name)
+            return None
         conn_kwargs.setdefault('dbname', self._postgresql.database)
         # gp_add_coordinator_standby() works only in utility mode, `-c gp_role=utility` is expected to come from
         # the `options` of the superuser in the `authentication` section. Member.conn_kwargs() doesn't pass them
