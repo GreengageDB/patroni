@@ -1,6 +1,7 @@
 import io
 import os
 import sys
+import tempfile
 import unittest
 
 from copy import deepcopy
@@ -9,6 +10,8 @@ from unittest.mock import MagicMock, Mock, patch
 from patroni import global_config
 from patroni.config import ClusterConfig, Config, ConfigParseError
 from patroni.postgresql.misc import PostgresqlRole
+from patroni.postgresql.mpp import get_mpp, Null
+from patroni.postgresql.mpp.greengage import Greengage
 
 from .test_ha import get_cluster_initialized_with_only_leader
 
@@ -163,6 +166,37 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(config._local_configuration,
                              {'test': False, 'test2': {'child-1': 'somestring', 'child-2': 10},
                               'test3': True, 'test4': [{'ab': 5}], 'new-attr': True})
+
+    @patch.object(Config, '_build_environment_configuration', return_value={})
+    def test_greengage_configuration_files(self, mock_environment):
+        for section in ('greengage:\n', 'greengage: null\n', 'greengage: {}\n'):
+            for directory_config in (False, True):
+                with self.subTest(section=section, directory=directory_config), \
+                        tempfile.TemporaryDirectory() as directory:
+                    path = os.path.join(directory, '01-specific.yml')
+                    if directory_config:
+                        with open(os.path.join(directory, '00-base.yml'), 'w') as f:
+                            f.write('greengage: {}\nremove_me: true\n')
+                    with open(path, 'w') as f:
+                        f.write(section + 'remove_me: null\n')
+                    config = Config(directory if directory_config else path, validator=None)
+                    if section == 'greengage: {}\n':
+                        self.assertEqual(config.local_configuration, {'greengage': {}})
+                        self.assertEqual(config['greengage'], {})
+                        self.assertIsInstance(get_mpp(config), Greengage)
+                    else:
+                        # Null removes an existing section during directory merging as for other settings.
+                        self.assertNotIn('greengage', config.local_configuration)
+                        self.assertNotIn('greengage', config)
+                        self.assertIsInstance(get_mpp(config), Null)
+                    self.assertNotIn('remove_me', config.local_configuration)
+
+        # An absent section must still leave Greengage integration disabled.
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'config.yml')
+            with open(path, 'w') as f:
+                f.write('name: postgres\n')
+            self.assertIsInstance(get_mpp(Config(path, validator=None)), Null)
 
     @patch('os.path.exists', Mock(return_value=True))
     @patch('os.path.isfile', Mock(return_value=False))

@@ -73,7 +73,7 @@ class Greengage(AbstractMPP):
 
         :returns: ``True`` if config passes validation, otherwise ``False``.
         """
-        return config is None or isinstance(config, dict)
+        return isinstance(config, dict)
 
     @staticmethod
     def check_config(config: Union['Config', Dict[str, Any]]) -> None:

@@ -69,7 +69,8 @@ class TestMPP(BaseTestPostgresql):
         mpp = get_mpp(config)
         self.assertIsInstance(mpp, Greengage)
         self.assertTrue(mpp.validate_config(config['greengage']))
-        self.assertTrue(mpp.validate_config(None))
+        self.assertFalse(mpp.validate_config(None))
+        self.assertIsInstance(get_mpp({'greengage': None}), Null)
         self.assertFalse(mpp.validate_config(1))
         # Greengage clusters are not grouped in DCS, therefore MPP is "disabled" from the Patroni point of view
         self.assertFalse(mpp.is_enabled())

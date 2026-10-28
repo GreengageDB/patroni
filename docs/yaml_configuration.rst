@@ -96,11 +96,13 @@ Enables integration Patroni with `Citus <https://docs.citusdata.com>`__. If conf
 
 Greengage
 ---------
-Enables integration of Patroni with the coordinator of a `Greengage DB <https://github.com/GreengageDB/greengage>`__ cluster. The section doesn't have any settings and an empty value is enough to enable it:
+Enables integration of Patroni with the coordinator of a `Greengage DB <https://github.com/GreengageDB/greengage>`__ cluster. The section has no settings; use an explicit empty mapping to enable it:
 
 .. code:: YAML
 
     greengage: {}
+
+A bare ``greengage:`` or ``greengage: null`` does not enable the integration. Null values remove settings during configuration file merging, so a null Greengage section in a later file removes an earlier section. Omit the section to leave the integration disabled.
 
 Only Greengage 7 is supported. Greengage 6 is not: it predates the renaming of "master" to "coordinator" in the catalog functions Patroni calls, e.g. ``gp_add_coordinator_standby()``.
 
