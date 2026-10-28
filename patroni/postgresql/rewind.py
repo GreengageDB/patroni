@@ -488,9 +488,10 @@ class Rewind(object):
         env = self._postgresql.config.write_pgpass(conn_kwargs)
         # pg_rewind connects to the source server on its own and the connection string we build below can't
         # carry libpq `options`, therefore they are passed to the child process via the environment. Greengage,
-        # for example, requires `gp_role=utility` for connections to the coordinator.
+        # for example, requires `gp_role=utility` for connections to the coordinator. Disable statement_timeout
+        # last so that user options can't impose a timeout on rewind, including its connection initialization.
         env.update(LANG='C', LC_ALL='C',
-                   PGOPTIONS=merge_options('-c statement_timeout=0', conn_kwargs.get('options')))
+                   PGOPTIONS=merge_options(conn_kwargs.get('options'), '-c statement_timeout=0'))
         dsn = self._postgresql.config.format_dsn({**conn_kwargs, 'password': None})
         logger.info('running pg_rewind from %s', dsn)
 

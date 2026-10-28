@@ -113,6 +113,24 @@ class TestRewind(BaseTestPostgresql):
             with patch.object(CancellableSubprocess, 'call', mock_cancellable_call1):
                 self.assertFalse(self.r.pg_rewind(r))
 
+    def test_pg_rewind_disables_statement_timeout(self):
+        with patch.object(Postgresql, 'major_version', PropertyMock(return_value=120000)), \
+                patch.object(Postgresql, 'get_guc_value', return_value=''), \
+                patch.object(CancellableSubprocess, 'call', side_effect=mock_cancellable_call0) as mock_call:
+            for options in (None, '-c statement_timeout=1', '-c gp_role=utility',
+                            '-c gp_role=utility -c statement_timeout=1'):
+                with self.subTest(options=options):
+                    auth = {'username': 'rewind'}
+                    if options:
+                        auth['options'] = options
+                    conn_kwargs = self.r._conn_kwargs(self.leader, auth)
+                    self.assertTrue(self.r.pg_rewind(conn_kwargs))
+                    env = mock_call.call_args.kwargs['env']
+                    # Required user options survive, but rewind must start with statement timeouts disabled.
+                    expected = (options + ' ' if options else '') + '-c statement_timeout=0'
+                    self.assertEqual(env['PGOPTIONS'], expected)
+                    self.assertEqual(conn_kwargs.get('options'), options)
+
     def test_pg_rewind_user_options(self):
         """Test pg_rewind with custom user options."""
         r = {'user': '', 'host': '', 'port': '', 'database': '', 'password': ''}
