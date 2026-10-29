@@ -2,7 +2,8 @@ from unittest.mock import call, Mock, mock_open, patch, PropertyMock
 
 from patroni.postgresql import Postgresql
 from patroni.postgresql.cancellable import CancellableSubprocess
-from patroni.postgresql.rewind import Rewind
+from patroni.postgresql.mpp import get_mpp
+from patroni.postgresql.rewind import Rewind, REWIND_STATUS
 
 from . import BaseTestPostgresql, MockCursor, psycopg_connect
 
@@ -89,6 +90,12 @@ class TestRewind(BaseTestPostgresql):
             mock_debug.assert_any_call('not checking diverged timeline: pg_rewind is not possible'
                                        ' and remove_data_directory_on_diverged_timelines is not enabled')
 
+    def test__conn_kwargs(self):
+        # the libpq `options` of the user are kept for connections to the leader, they aren't by Member.conn_kwargs()
+        conn_kwargs = self.r._conn_kwargs(self.leader, {'username': 'foo', 'options': '-c gp_role=utility'})
+        self.assertEqual(conn_kwargs['options'], '-c gp_role=utility')
+        self.assertNotIn('options', self.r._conn_kwargs(self.leader, {'username': 'foo'}))
+
     def test_pg_rewind(self):
         r = {'user': '', 'host': '', 'port': '', 'database': '', 'password': ''}
         with patch.object(Postgresql, 'major_version', PropertyMock(return_value=150000)), \
@@ -106,6 +113,24 @@ class TestRewind(BaseTestPostgresql):
                 self.assertTrue(self.r.pg_rewind(r))
             with patch.object(CancellableSubprocess, 'call', mock_cancellable_call1):
                 self.assertFalse(self.r.pg_rewind(r))
+
+    def test_pg_rewind_disables_statement_timeout(self):
+        with patch.object(Postgresql, 'major_version', PropertyMock(return_value=120000)), \
+                patch.object(Postgresql, 'get_guc_value', return_value=''), \
+                patch.object(CancellableSubprocess, 'call', side_effect=mock_cancellable_call0) as mock_call:
+            for options in (None, '-c statement_timeout=1', '-c gp_role=utility',
+                            '-c gp_role=utility -c statement_timeout=1'):
+                with self.subTest(options=options):
+                    auth = {'username': 'rewind'}
+                    if options:
+                        auth['options'] = options
+                    conn_kwargs = self.r._conn_kwargs(self.leader, auth)
+                    self.assertTrue(self.r.pg_rewind(conn_kwargs))
+                    env = mock_call.call_args.kwargs['env']
+                    # Required user options survive, but rewind must start with statement timeouts disabled.
+                    expected = (options + ' ' if options else '') + '-c statement_timeout=0'
+                    self.assertEqual(env['PGOPTIONS'], expected)
+                    self.assertEqual(conn_kwargs.get('options'), options)
 
     def test_pg_rewind_user_options(self):
         """Test pg_rewind with custom user options."""
@@ -295,6 +320,33 @@ class TestRewind(BaseTestPostgresql):
 
         with patch.object(Postgresql, 'is_running', Mock(return_value=True)):
             self.r.execute(self.leader)
+
+    def test_execute_prepares_greengage_before_rewind(self):
+        self.p.mpp_handler = handler = get_mpp({'greengage': {}}).get_handler_impl(self.p)
+        self.leader.member.data.update(version='4.1.5', role='primary')
+        self.r._state = REWIND_STATUS.NEED
+        with patch.object(Postgresql, 'is_running', return_value=True), \
+                patch.object(Postgresql, 'stop', return_value=True) as mock_stop, \
+                patch.object(Rewind, '_archive_ready_wals'), \
+                patch.object(Rewind, 'check_leader_is_not_in_recovery', return_value=True), \
+                patch.object(handler, '_register_standby', return_value=None) as mock_register, \
+                patch.object(Rewind, 'pg_rewind') as mock_rewind:
+            self.assertIsNone(self.r.execute(self.leader))
+            mock_rewind.assert_not_called()
+            self.assertEqual(self.r._state, REWIND_STATUS.NEED)
+
+            def rewind_after_registration(conn_kwargs):
+                mock_stop.assert_called_once_with(checkpoint=False)
+                self.assertEqual(handler._get_local_dbid(), 9)
+                return True
+
+            # A deferred rewind can retry after registration succeeds, with the new dbid already on disk.
+            mock_stop.reset_mock()
+            mock_register.return_value = 9
+            mock_rewind.side_effect = rewind_after_registration
+            self.r.execute(self.leader)
+            mock_rewind.assert_called_once()
+            self.assertEqual(self.r._state, REWIND_STATUS.SUCCESS)
 
     @patch('patroni.postgresql.rewind.logger.info')
     def test__log_primary_history(self, mock_logger):

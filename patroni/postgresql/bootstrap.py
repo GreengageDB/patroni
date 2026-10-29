@@ -155,11 +155,14 @@ class Bootstrap(object):
         return True
 
     def create_replica(self, clone_member: Union[Leader, Member, None],
-                       clone_from_leader: bool = False) -> Optional[int]:
+                       clone_from_leader: bool = False, leader: Optional[Leader] = None) -> Optional[int]:
         """
             create the replica according to the replica_method
             defined by the user.  this is a list, so we need to
             loop through all methods the user supplies
+
+            the leader is passed to the MPP handler, the clone_member
+            is not necessarily the leader
         """
 
         self._postgresql.set_state(PostgresqlState.CREATING_REPLICA)
@@ -199,7 +202,11 @@ class Bootstrap(object):
 
             # if the method is basebackup, then use the built-in
             if replica_method == "basebackup":
-                ret = self.basebackup(connstring, env, method_config)
+                mpp_options = self._postgresql.mpp_handler.basebackup_options(leader)
+                if mpp_options is None:
+                    ret = 1
+                    continue
+                ret = self.basebackup(connstring, env, method_config, mpp_options)
                 if ret == 0:
                     logger.info("replica has been created using basebackup")
                     # if basebackup succeeds, exit with success
@@ -260,16 +267,20 @@ class Bootstrap(object):
         if line:
             logger.info('pg_basebackup: %s', line.decode('utf-8', 'replace'))
 
-    def basebackup(self, conn_url: str, env: Dict[str, str], options: Dict[str, Any]) -> Optional[int]:
+    def basebackup(self, conn_url: str, env: Dict[str, str], options: Dict[str, Any],
+                   mpp_options: Optional[List[str]] = None) -> Optional[int]:
         # creates a replica data dir using pg_basebackup.
         # this is the default, built-in create_replica_methods
         # tries twice, then returns failure (as 1)
         # uses "stream" as the xlog-method to avoid sync issues
         # supports additional user-supplied options, those are not validated
+        # options required by the MPP handler can't be overridden by the user
         maxfailures = 2
         ret = 1
+        mpp_options = mpp_options or []
         not_allowed_options = ['pgdata', 'format', 'wal-method', 'xlog-method', 'gzip',
                                'version', 'dbname', 'host', 'port', 'username', 'password']
+        not_allowed_options += [opt.lstrip('-').split('=', 1)[0] for opt in mpp_options]
         pg_version = self._postgresql.config.pg_version
         if pg_version < 150000:
             not_allowed_options.append('compress')
@@ -293,7 +304,7 @@ class Bootstrap(object):
             "-X",
             "stream",
             "--dbname=" + conn_url,
-        ] + user_options
+        ] + mpp_options + user_options
 
         # pg_basebackup --progress reports the copy progress while it is running, therefore
         # the output is streamed to the log as it arrives instead of being discarded
@@ -324,7 +335,8 @@ class Bootstrap(object):
 
         return ret
 
-    def clone(self, clone_member: Union[Leader, Member, None], clone_from_leader: bool = False) -> bool:
+    def clone(self, clone_member: Union[Leader, Member, None], clone_from_leader: bool = False,
+              leader: Optional[Leader] = None) -> bool:
         """
              - initialize the replica from an existing member (primary or replica)
              - initialize the replica using the replica creation method that
@@ -332,7 +344,7 @@ class Bootstrap(object):
                base backup)
         """
 
-        ret = self.create_replica(clone_member, clone_from_leader) == 0
+        ret = self.create_replica(clone_member, clone_from_leader, leader) == 0
         if ret:
             self._post_restore()
         return ret

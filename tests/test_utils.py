@@ -98,6 +98,18 @@ class TestUtils(unittest.TestCase):
             self.assertEqual(get_postgres_version(), '10.0')
         with patch('subprocess.check_output', Mock(return_value=b'postgres (PostgreSQL) 10wow, something new\n')):
             self.assertEqual(get_postgres_version(), '10.0')
+        # forks name themselves differently and the product name may consist of more than one word
+        with patch('subprocess.check_output', Mock(return_value=b'postgres (Greengage Database) 12.22\n')):
+            self.assertEqual(get_postgres_version(), '12.22')
+        with patch('subprocess.check_output',
+                   Mock(return_value=b'postgres (Greenplum Database) 9.4.26 build dev\n')):
+            self.assertEqual(get_postgres_version(), '9.4.26')
+        with patch('subprocess.check_output', Mock(return_value=b'postgres Product 15.2\n')):
+            self.assertEqual(get_postgres_version(), '15.2')
+        with patch('subprocess.check_output', Mock(return_value=b'postgres 15.2\n')):
+            self.assertEqual(get_postgres_version(), '15.2')
+        with patch('subprocess.check_output', Mock(return_value=b'postgres (PostgreSQL) devel\n')):
+            self.assertRaisesRegex(PatroniException, 'Failed to parse postgres version', get_postgres_version)
         with patch('subprocess.check_output', Mock(side_effect=OSError)):
             self.assertRaises(PatroniException, get_postgres_version, 'postgres')
 

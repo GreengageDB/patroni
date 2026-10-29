@@ -92,6 +92,43 @@ Enables integration Patroni with `Citus <https://docs.citusdata.com>`__. If conf
 -  **group**: the Citus group id, integer. Use ``0`` for coordinator and ``1``, ``2``, etc... for workers
 -  **database**: the database where ``citus`` extension should be created. Must be the same on the coordinator and all workers. Currently only one database is supported.
 
+.. _greengage_settings:
+
+Greengage
+---------
+Enables integration of Patroni with the coordinator of a `Greengage DB <https://github.com/GreengageDB/greengage>`__ cluster. The section has no settings; use an explicit empty mapping to enable it:
+
+.. code:: YAML
+
+    greengage: {}
+
+A bare ``greengage:`` or ``greengage: null`` does not enable the integration. Null values remove settings during configuration file merging, so a null Greengage section in a later file removes an earlier section. Omit the section to leave the integration disabled.
+
+Only Greengage 7 is supported. Greengage 6 is not: it predates the renaming of "master" to "coordinator" in the catalog functions Patroni calls, e.g. ``gp_add_coordinator_standby()``.
+
+Patroni sets ``application_name=gp_walreceiver`` in the standby's ``primary_conninfo`` to preserve Greengage's native synchronous coordinator replication. Greengage requires this exact name before coordinator transactions wait for standby acknowledgements; setting ``synchronous_standby_names`` alone is insufficient. Replication slots continue to use the Patroni member names.
+
+Greengage's native behavior allows commits when no qualifying standby is connected or sufficiently caught up, and synchronous waiting also depends on ``synchronous_commit``. Patroni's ``synchronous_mode`` (including strict and quorum modes) is not supported for Greengage: it identifies members by their replication application names and assumes PostgreSQL's ``synchronous_standby_names`` semantics. Keep ``synchronous_mode`` disabled; native synchronous replication does not provide Patroni's strict synchronous failover guarantees.
+
+When enabled, Patroni starts the coordinator with ``--gp_role=dispatch`` and makes sure that ``max_prepared_transactions``, which distributed transactions are built on, is not 0: unless configured, it is set to ``max_connections``. Other GUCs from the list Patroni manages in DCS, for example ``max_connections``, ``max_locks_per_transaction`` and ``max_worker_processes``, get Patroni's defaults unless configured in DCS, which are lower than the Greengage ones (128 for ``max_locks_per_transaction``, 12 for ``max_worker_processes``, or 13 if Greengage is built with ``--enable-ic-proxy``). Set them in ``bootstrap.dcs`` or with ``patronictl edit-config`` to the values the cluster was created with. Connections Patroni opens to the coordinators must be utility mode connections, therefore ``options: -c gp_role=utility`` has to be set for the superuser and the rewind user in the :ref:`postgresql.authentication <postgresql_settings>` section. The replication user doesn't need it, replication connections don't depend on ``gp_role``. Patroni refuses to start if it isn't set for the superuser or, if configured, for the rewind user: a dispatch mode connection fails on a standby whose dbid isn't yet in the replicated catalog, and ``pg_rewind`` silently produces a broken data directory. The check is done only when Patroni starts, not when the configuration is reloaded (``SIGHUP``, ``patronictl reload`` or the REST API), therefore the ``options`` must not be removed from a running Patroni.
+
+Greengage keeps the coordinators in ``gp_segment_configuration`` and on promotion of the standby removes the row of the old coordinator. Therefore, before a node starts to replicate from the leader, Patroni registers it there as the coordinator standby with ``gp_add_coordinator_standby()`` and writes the dbid assigned by the catalog as ``gp_dbid`` to ``internal.auto.conf`` of the node. When rewind is needed, this preparation happens before ``pg_rewind``, so new tablespace directories use the assigned dbid; rewind is deferred if preparation fails. Existing tablespace symlinks are preserved by ``pg_rewind``. When a new replica is created with ``pg_basebackup``, it is registered beforehand and the dbid is passed as ``--target-gp-dbid``. Like ``gpinitstandby``, Patroni also passes ``--no-verify-checksums``, because the checksum verification fails on append-optimized tables. Neither option can be set in :ref:`postgresql.basebackup <postgresql_settings>`. Greengage's ``pg_basebackup`` reads settings of the source server, so the replication user needs ``GRANT pg_read_all_settings TO <replication user>``.
+
+.. warning::
+    Greengage supports only one coordinator standby, therefore a Patroni cluster of Greengage coordinators must consist of exactly two members. Additional members aren't supported, even with ``nofailover: true`` in the :ref:`tags <tags_settings>` section: such a member can't be registered as the standby, therefore it can't be created with ``pg_basebackup``, which needs the dbid assigned by the registration, and its ``gp_dbid`` isn't maintained. If Patroni promoted it, Greengage wouldn't update its catalog: the promotion fails with ``gp_activate_standby can only be run on the standby coordinator``, Patroni then starts postgres again as the primary, and ``gp_segment_configuration`` keeps listing the previous coordinator as the primary one. The cluster seems to work, but Greengage utilities and the next promotion rely on the wrong catalog. The ``replicatefrom`` tag isn't supported either: the standby registers itself on the member it replicates from, which has to be the leader. A node whose registration failed (Patroni logs an error starting with ``Greengage:``) must not be promoted either until it is registered, which happens on its next start as a replica.
+
+.. warning::
+    Patroni manages ``pg_hba.conf`` of the coordinators only. The segments must accept connections from every host that can become the coordinator, otherwise the new coordinator can't dispatch queries after a promotion. ``gpinitsystem`` and ``gpinitstandby`` add the entries for the hosts they set up, for the latter one line per address of the standby host in ``pg_hba.conf`` of every primary and mirror segment:
+
+    .. code::
+
+        host  all  gpadmin  192.0.2.10/32  trust
+
+    If a coordinator is moved to a host that wasn't set up with ``gpinitsystem`` or ``gpinitstandby``, e.g. re-created there by Patroni with ``pg_basebackup``, such entries have to be added to all segments manually, followed by ``gpstop -u``.
+
+.. note::
+    Unlike Citus, Greengage segments are not managed by Patroni, hence there are no groups and the layout of the keys in DCS is the same as for a standalone PostgreSQL cluster.
+
 .. _consul_settings:
 
 Consul
@@ -265,6 +302,7 @@ PostgreSQL
          -  **sslnegotiation**: (optional) maps to the `sslnegotiation <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLNEGOTIATION>`__ connection parameter, which controls how SSL encryption is negotiated with the server, if SSL is used.
          -  **gssencmode**: (optional) maps to the `gssencmode <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-GSSENCMODE>`__ connection parameter, which determines whether or with what priority a secure GSS TCP/IP connection will be negotiated with the server
          -  **channel_binding**: (optional) maps to the `channel_binding <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-CHANNEL-BINDING>`__ connection parameter, which controls the client's use of channel binding.
+         -  **options**: (optional) maps to the `options <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-OPTIONS>`__ connection parameter, which specifies command-line options to be sent to the server at connection start. Patroni appends the configured value to the options it sets itself for its connections to the local PostgreSQL (heartbeat, REST API, replication slots management, ``CHECKPOINT``), therefore it is possible to override them. If no rewind user is configured, it is also used for the connections to the leader described for the rewind user and for ``CHECKPOINT`` on the leader before ``pg_rewind``.
       -  **replication**:
 
          -  **username**: replication username; the user will be created during initialization. Replicas will use this user to access the replication source via streaming replication
@@ -279,6 +317,7 @@ PostgreSQL
          -  **sslnegotiation**: (optional) maps to the `sslnegotiation <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLNEGOTIATION>`__ connection parameter, which controls how SSL encryption is negotiated with the server, if SSL is used.
          -  **gssencmode**: (optional) maps to the `gssencmode <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-GSSENCMODE>`__ connection parameter, which determines whether or with what priority a secure GSS TCP/IP connection will be negotiated with the server
          -  **channel_binding**: (optional) maps to the `channel_binding <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-CHANNEL-BINDING>`__ connection parameter, which controls the client's use of channel binding.
+         -  **options**: (optional) maps to the `options <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-OPTIONS>`__ connection parameter, which specifies command-line options to be sent to the server at connection start. Patroni doesn't use it for ``primary_conninfo``, ``pg_basebackup`` and the replication protocol connections. It is only used for the check of the leader before the data directory of a diverged replica is removed, if ``use_pg_rewind`` is disabled, ``remove_data_directory_on_diverged_timelines`` is enabled and PostgreSQL is older than 11.
       -  **rewind**:
 
          -  **username**: (optional) name for the user for ``pg_rewind``; the user will be created during initialization of postgres 11+ and all necessary `permissions <https://www.postgresql.org/docs/11/app-pgrewind.html#id-1.9.5.8.8>`__ will be granted.
@@ -293,6 +332,7 @@ PostgreSQL
          -  **sslnegotiation**: (optional) maps to the `sslnegotiation <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLNEGOTIATION>`__ connection parameter, which controls how SSL encryption is negotiated with the server, if SSL is used.
          -  **gssencmode**: (optional) maps to the `gssencmode <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-GSSENCMODE>`__ connection parameter, which determines whether or with what priority a secure GSS TCP/IP connection will be negotiated with the server
          -  **channel_binding**: (optional) maps to the `channel_binding <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-CHANNEL-BINDING>`__ connection parameter, which controls the client's use of channel binding.
+         -  **options**: (optional) maps to the `options <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-OPTIONS>`__ connection parameter, which specifies command-line options to be sent to the server at connection start. Patroni appends the configured value to the options it sets itself for its connections to the leader: the checks before running ``pg_rewind``, ``pg_rewind`` itself (in the ``PGOPTIONS`` environment variable) and copying of logical replication slots.
 
    -  **callbacks**: callback scripts to run on certain actions. Patroni will pass the action, role and cluster name. (See scripts/aws.py as an example of how to write them.)
 

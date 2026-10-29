@@ -26,7 +26,8 @@ mock_available_gucs = PropertyMock(return_value={
     'max_locks_per_transaction', 'max_prepared_transactions', 'max_replication_slots', 'max_stack_depth',
     'max_wal_senders', 'max_worker_processes', 'port', 'search_path', 'shared_preload_libraries',
     'stats_temp_directory', 'synchronous_standby_names', 'track_commit_timestamp', 'unix_socket_directories',
-    'vacuum_cost_delay', 'vacuum_cost_limit', 'wal_keep_size', 'wal_level', 'wal_log_hints', 'zero_damaged_pages',
+    'vacuum_cost_delay', 'vacuum_cost_limit', 'wal_keep_segments', 'wal_keep_size', 'wal_level', 'wal_log_hints',
+    'zero_damaged_pages',
     'autovacuum', 'wal_segment_size', 'wal_block_size', 'shared_buffers', 'wal_buffers', 'fork_specific_param',
 })
 

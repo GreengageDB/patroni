@@ -1073,7 +1073,7 @@ class RealValidator(object):
         return ret
 
 
-userattributes = {"username": "", Optional("password"): ""}
+userattributes = {"username": "", Optional("password"): "", Optional("options"): ""}
 available_dcs = [m.split(".")[-1] for m in dcs_modules()]
 setattr(validate_host_port_list, 'expected_type', list)
 setattr(comma_separated_host_port, 'expected_type', str)
@@ -1278,6 +1278,7 @@ schema = Schema({
         "database": str,
         "group": IntValidator(min=0, expected_type=int, raise_assert=True),
     },
+    Optional("greengage"): dict,
     "postgresql": {
         "listen": validate_host_port_listen_multiple_hosts,
         "connect_address": validate_connect_address,
