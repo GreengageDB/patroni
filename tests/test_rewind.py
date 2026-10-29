@@ -2,7 +2,8 @@ from unittest.mock import call, Mock, mock_open, patch, PropertyMock
 
 from patroni.postgresql import Postgresql
 from patroni.postgresql.cancellable import CancellableSubprocess
-from patroni.postgresql.rewind import Rewind
+from patroni.postgresql.mpp import get_mpp
+from patroni.postgresql.rewind import Rewind, REWIND_STATUS
 
 from . import BaseTestPostgresql, MockCursor, psycopg_connect
 
@@ -319,6 +320,33 @@ class TestRewind(BaseTestPostgresql):
 
         with patch.object(Postgresql, 'is_running', Mock(return_value=True)):
             self.r.execute(self.leader)
+
+    def test_execute_prepares_greengage_before_rewind(self):
+        self.p.mpp_handler = handler = get_mpp({'greengage': {}}).get_handler_impl(self.p)
+        self.leader.member.data.update(version='4.1.5', role='primary')
+        self.r._state = REWIND_STATUS.NEED
+        with patch.object(Postgresql, 'is_running', return_value=True), \
+                patch.object(Postgresql, 'stop', return_value=True) as mock_stop, \
+                patch.object(Rewind, '_archive_ready_wals'), \
+                patch.object(Rewind, 'check_leader_is_not_in_recovery', return_value=True), \
+                patch.object(handler, '_register_standby', return_value=None) as mock_register, \
+                patch.object(Rewind, 'pg_rewind') as mock_rewind:
+            self.assertIsNone(self.r.execute(self.leader))
+            mock_rewind.assert_not_called()
+            self.assertEqual(self.r._state, REWIND_STATUS.NEED)
+
+            def rewind_after_registration(conn_kwargs):
+                mock_stop.assert_called_once_with(checkpoint=False)
+                self.assertEqual(handler._get_local_dbid(), 9)
+                return True
+
+            # A deferred rewind can retry after registration succeeds, with the new dbid already on disk.
+            mock_stop.reset_mock()
+            mock_register.return_value = 9
+            mock_rewind.side_effect = rewind_after_registration
+            self.r.execute(self.leader)
+            mock_rewind.assert_called_once()
+            self.assertEqual(self.r._state, REWIND_STATUS.SUCCESS)
 
     @patch('patroni.postgresql.rewind.logger.info')
     def test__log_primary_history(self, mock_logger):

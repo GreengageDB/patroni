@@ -571,6 +571,9 @@ class Rewind(object):
         elif not self.check_leader_is_not_in_recovery(r):
             return
 
+        if not self._postgresql.mpp_handler.before_rewind(leader):
+            return logger.warning('Deferring pg_rewind from %s: MPP preparation failed', leader.name)
+
         if self.pg_rewind(r):
             self._maybe_clean_pg_replslot()
             self._state = REWIND_STATUS.SUCCESS

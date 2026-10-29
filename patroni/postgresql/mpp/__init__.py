@@ -213,6 +213,15 @@ class AbstractMPPHandler(AbstractMPP):
         """
         return []
 
+    def before_rewind(self, leader: Union[Leader, Member]) -> bool:
+        """Prepare the stopped target before running ``pg_rewind`` against *leader*.
+
+        :param leader: the source member, after its promotion and checkpoint have been checked.
+
+        :returns: ``True`` if rewind may proceed, ``False`` to defer it and retry later.
+        """
+        return True
+
     def before_follow(self, leader: Union[Leader, Member]) -> None:
         """Is called before postgres is started or restarted as a replica of the *leader*.
 

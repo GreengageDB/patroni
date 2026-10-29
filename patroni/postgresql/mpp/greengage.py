@@ -337,23 +337,39 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
         except Exception as e:
             logger.error('Greengage: failed to register the coordinator standby on %s: %r', leader.name, e)
 
-    def before_follow(self, leader: Union[Leader, Member]) -> None:
+    def _prepare_standby(self, leader: Union[Leader, Member]) -> bool:
         """Register this node on the *leader* and bring ``gp_dbid`` in ``internal.auto.conf`` in line with it.
 
         .. note::
             ``pg_rewind`` doesn't touch ``internal.auto.conf``, therefore the file of the former primary still
             has its old ``gp_dbid``, while its row has already been removed from the catalog by the promotion.
+            Preparation must happen before rewind reads that dbid to create new tablespace directories.
 
         :param leader: the member this node is going to replicate from. It has to be the leader, the
             ``replicatefrom`` tag isn't supported.
+
+        :returns: ``True`` if the local dbid matches the standby registration, ``False`` if registration failed.
         """
         dbid = self._register_standby(leader)
         if dbid is None:
-            return
+            return False
         local_dbid = self._get_local_dbid()
         if local_dbid != dbid:
             logger.info('Greengage: changing gp_dbid in %s from %s to %s', self._internal_auto_conf, local_dbid, dbid)
             self._set_local_dbid(dbid)
+        return True
+
+    def before_rewind(self, leader: Union[Leader, Member]) -> bool:
+        """Register the target and record its dbid before rewind creates tablespace directories."""
+        try:
+            return self._prepare_standby(leader)
+        except OSError as e:
+            logger.error('Greengage: failed to record the coordinator standby dbid before rewind: %r', e)
+            return False
+
+    def before_follow(self, leader: Union[Leader, Member]) -> None:
+        """Prepare the standby also when following without rewind, e.g. after a clean switchover."""
+        self._prepare_standby(leader)
 
     def basebackup_options(self, leader: Optional[Leader]) -> Optional[List[str]]:
         """Additional command line options for ``pg_basebackup``.

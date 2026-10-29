@@ -60,6 +60,7 @@ class TestMPP(BaseTestPostgresql):
         self.assertIsNone(nullHandler.adjust_postgres_gucs({}))
         self.assertEqual(nullHandler.cmdline_options(), [])
         self.assertEqual(nullHandler.replication_application_name(), self.p.name)
+        self.assertTrue(nullHandler.before_rewind(self.cluster.leader))
         self.assertIsNone(nullHandler.before_follow(self.cluster.leader))
         self.assertEqual(nullHandler.basebackup_options(self.cluster.leader), [])
         self.assertFalse(nullHandler.ignore_replication_slot({}))
@@ -147,6 +148,24 @@ class TestMPP(BaseTestPostgresql):
                                get_mpp, config)
         self.assertIsNone(get_gp_role(None))
         self.assertIsNone(get_gp_role('-c work_mem=1MB'))
+
+    def test_greengage_before_rewind(self):
+        handler = get_mpp({'greengage': {}}).get_handler_impl(self.p)
+        leader = self.cluster.leader
+        with patch.object(handler, '_register_standby', return_value=None):
+            self.assertFalse(handler.before_rewind(leader))
+            self.assertIsNone(handler._get_local_dbid())
+        with patch.object(handler, '_register_standby', return_value=9):
+            self.assertTrue(handler.before_rewind(leader))
+            self.assertEqual(handler._get_local_dbid(), 9)
+            # Repeated preparation must not rewrite a matching dbid.
+            with patch.object(handler, '_set_local_dbid') as mock_set:
+                self.assertTrue(handler.before_rewind(leader))
+                mock_set.assert_not_called()
+        with patch.object(handler, '_register_standby', return_value=10), \
+                patch.object(handler, '_set_local_dbid', side_effect=OSError('read-only file')):
+            self.assertFalse(handler.before_rewind(leader))
+            self.assertEqual(handler._get_local_dbid(), 9)
 
     @patch('patroni.postgresql.mpp.greengage.get_connection_cursor')
     def test_greengage_standby_registration(self, mock_get_cursor):
