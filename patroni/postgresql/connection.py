@@ -7,6 +7,7 @@ from typing import Any, Dict, Generator, List, Optional, Tuple, TYPE_CHECKING, U
 if TYPE_CHECKING:  # pragma: no cover
     from psycopg import Connection, Cursor
     from psycopg2 import connection, cursor
+    from ..dcs import Leader, Member
 
 from .misc import merge_options
 from .. import psycopg
@@ -16,6 +17,19 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CONNECT_TIMEOUT = 3
 DEFAULT_CONNECTION_OPTIONS = '-c statement_timeout=2000'
+
+
+def remote_conn_kwargs(member: Union['Leader', 'Member'], auth: Dict[str, Any]) -> Dict[str, Any]:
+    """Build connection parameters for a remote member, preserving trusted authentication ``options``.
+
+    ``Member.conn_kwargs()`` deliberately excludes ``options`` from *auth*. Some callers need these locally
+    configured libpq options, for example Greengage's ``gp_role=utility``. Other excluded parameters such as
+    ``connect_timeout`` remain excluded.
+    """
+    ret = member.conn_kwargs(auth)
+    if auth.get('options'):
+        ret['options'] = auth['options']
+    return ret
 
 
 class NamedConnection:

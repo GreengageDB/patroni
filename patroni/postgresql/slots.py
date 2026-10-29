@@ -17,7 +17,7 @@ from ..dcs import Cluster, Leader, slot_name_from_member_name
 from ..file_perm import pg_perm
 from ..psycopg import OperationalError
 from ..tags import Tags
-from .connection import get_connection_cursor
+from .connection import get_connection_cursor, remote_conn_kwargs
 from .misc import format_lsn, fsync_dir, merge_options, PostgresqlRole
 from .sync import SYNC_STRICT_PLACEHOLDER
 
@@ -735,12 +735,8 @@ class SlotsHandler:
         :yields: connection cursor object, note implementation varies depending on version of ``psycopg``.
         """
         auth = self._postgresql.config.rewind_credentials
-        conn_kwargs = leader.conn_kwargs(auth)
+        conn_kwargs = remote_conn_kwargs(leader, auth)
         conn_kwargs['dbname'] = self._postgresql.database
-        # Member.conn_kwargs() doesn't pass on the libpq `options` of the user, get_connection_cursor() appends them
-        # to the default ones
-        if auth.get('options'):
-            conn_kwargs['options'] = auth['options']
         with get_connection_cursor(**conn_kwargs) as cur:
             yield cur
 

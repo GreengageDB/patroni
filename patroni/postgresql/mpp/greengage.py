@@ -28,7 +28,7 @@ from ...dcs import Cluster, Leader, Member
 from ...exceptions import ConfigParseError
 from ...file_perm import pg_perm
 from ...utils import parse_int, split_host_port
-from ..connection import get_connection_cursor
+from ..connection import get_connection_cursor, remote_conn_kwargs
 from ..misc import fsync_dir
 from . import AbstractMPP, AbstractMPPHandler
 
@@ -317,20 +317,16 @@ class GreengageHandler(Greengage, AbstractMPPHandler):
         if not address:
             return None
         host, port, data_dir = address
-        conn_kwargs = leader.conn_kwargs(self._postgresql.config.superuser)
+        conn_kwargs = remote_conn_kwargs(leader, self._postgresql.config.superuser)
         if not conn_kwargs.get('host'):
-            # Member.conn_kwargs() returns {} if the leader doesn't announce a conn_url, e.g. when the leader key
-            # outlives the member key in DCS. libpq would then connect to its built-in defaults, possibly to an
+            # Member.conn_kwargs() provides no host if the leader doesn't announce a conn_url, e.g. when the leader
+            # key outlives the member key in DCS. libpq would then connect to its built-in defaults, possibly to an
             # entirely different postgres, where the standby must not be registered.
             logger.error('Greengage: the leader %s has no connection address, can not register the coordinator'
                          ' standby', leader.name)
             return None
         conn_kwargs.setdefault('dbname', self._postgresql.database)
-        # gp_add_coordinator_standby() works only in utility mode, `-c gp_role=utility` is expected to come from
-        # the `options` of the superuser in the `authentication` section. Member.conn_kwargs() doesn't pass them
-        # on, hence they are added explicitly, and get_connection_cursor() appends them to the default ones.
-        if self._postgresql.config.superuser.get('options'):
-            conn_kwargs['options'] = self._postgresql.config.superuser['options']
+        # gp_add_coordinator_standby() needs the utility mode options from the superuser configuration.
         try:
             with get_connection_cursor(**conn_kwargs) as cur:
                 return self._register(cur, host, port, data_dir)

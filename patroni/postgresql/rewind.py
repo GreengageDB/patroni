@@ -15,7 +15,7 @@ from ..collections import EMPTY_DICT
 from ..dcs import Leader, RemoteMember
 from ..utils import process_user_options
 from . import Postgresql
-from .connection import get_connection_cursor
+from .connection import get_connection_cursor, remote_conn_kwargs
 from .misc import format_lsn, fsync_dir, merge_options, parse_history, parse_lsn, PostgresqlRole
 
 logger = logging.getLogger(__name__)
@@ -232,12 +232,7 @@ class Rewind(object):
         logger.info('primary: history=%s', '\n'.join(history_show))
 
     def _conn_kwargs(self, member: Union[Leader, RemoteMember], auth: Dict[str, Any]) -> Dict[str, Any]:
-        ret = member.conn_kwargs(auth)
-        # Member.conn_kwargs() doesn't pass on the libpq `options` of the user. We need them, because some forks
-        # require them for connections to the leader (e.g. `-c gp_role=utility` for Greengage), and they are also
-        # passed to pg_rewind via PGOPTIONS.
-        if auth.get('options'):
-            ret['options'] = auth['options']
+        ret = remote_conn_kwargs(member, auth)
         if not ret.get('dbname'):
             ret['dbname'] = self._postgresql.database
         # Add target_session_attrs to make sure we hit the primary.
