@@ -1,0 +1,58 @@
+## Environment for the Patroni + Greengage PoC:
+##   * etcd 3.7   -- DCS, reachable over the network at http://etcd:2379
+##                   (and from the host at 127.0.0.1:2379)
+##   * greengage  -- equivalent of
+##       docker run --name greengage --rm -it \
+##           --sysctl 'kernel.sem=500 1024000 200 4096' \
+##           -v $PWD:/home/gpadmin/patroni \
+##           ghcr.io/greengagedb/greengage/ggdb7_ubuntu:7.5.0
+##
+## Usage:
+##   docker compose -f docker-compose-greengage.yml up -d
+##   docker compose -f docker-compose-greengage.yml exec greengage bash
+##
+## Inside the greengage container this repository is mounted at /home/gpadmin/patroni;
+## the Patroni configs docker/greengage/mdw.yml and smdw.yml point at `etcd3: host: etcd:2379`.
+## See docker/greengage/README.md for the complete setup.
+##
+## etcd keeps its data inside the container, so `docker compose down` discards it together
+## with the Greengage cluster, and the next `up` starts with an empty etcd.
+
+name: patroni-greengage
+
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.7.2
+    container_name: etcd
+    # no TLS and no authentication -- local development only
+    command:
+      - etcd
+      # listen on all interfaces, so that both greengage and the host can reach it
+      - --listen-client-urls=http://0.0.0.0:2379
+      # Patroni discovers the endpoints from the member list, hence not localhost
+      - --advertise-client-urls=http://etcd:2379
+    ports:
+      # expose etcd to the host as well (Patroni outside the container: etcd3.host 127.0.0.1:2379)
+      - "2379:2379"
+    healthcheck:
+      test: ["CMD", "etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  greengage:
+    image: ghcr.io/greengagedb/greengage/ggdb7_ubuntu:7.5.0
+    container_name: greengage
+    # registered by make_cluster in gp_segment_configuration and used in connect_address of the Patroni configs
+    hostname: greengage
+    # equivalent of `-it` in docker run, otherwise bash exits right away
+    stdin_open: true
+    tty: true
+    sysctls:
+      kernel.sem: "500 1024000 200 4096"
+    volumes:
+      - .:/home/gpadmin/patroni
+    depends_on:
+      etcd:
+        condition: service_healthy

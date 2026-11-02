@@ -273,6 +273,32 @@ class TestSlotsHandler(BaseTestPostgresql):
         with patch.object(MockCursor, 'rowcount', PropertyMock(return_value=1), create=True):
             self.assertEqual(self.s.sync_replication_slots(self.cluster, self.tags), ['ls'])
 
+    @patch('patroni.postgresql.slots.get_connection_cursor')
+    def test_get_local_connection_cursor(self, mock_get_cursor):
+        # the libpq `options` of the pool, e.g. of the superuser, are kept, the ones of the caller are appended
+        self.p.connection_pool.conn_kwargs = {'options': '-c gp_role=utility'}
+        pool_options = self.p.connection_pool.conn_kwargs['options']
+        with self.s.get_local_connection_cursor(dbname='foo', options='-c statement_timeout=0'):
+            pass
+        self.assertEqual(mock_get_cursor.call_args[1]['options'], pool_options + ' -c statement_timeout=0')
+        self.assertEqual(mock_get_cursor.call_args[1]['dbname'], 'foo')
+        with self.s.get_local_connection_cursor(dbname='foo'):
+            pass
+        self.assertEqual(mock_get_cursor.call_args[1]['options'], pool_options)
+
+    @patch('patroni.postgresql.slots.get_connection_cursor')
+    def test__get_leader_connection_cursor(self, mock_get_cursor):
+        # the libpq `options` of the rewind user are passed on, they aren't by Member.conn_kwargs()
+        with patch.object(ConfigHandler, 'rewind_credentials',
+                          PropertyMock(return_value={'username': 'foo', 'options': '-c gp_role=utility'})):
+            with self.s._get_leader_connection_cursor(self.leader):
+                pass
+        self.assertEqual(mock_get_cursor.call_args[1]['options'], '-c gp_role=utility')
+        with patch.object(ConfigHandler, 'rewind_credentials', PropertyMock(return_value={'username': 'foo'})):
+            with self.s._get_leader_connection_cursor(self.leader):
+                pass
+        self.assertNotIn('options', mock_get_cursor.call_args[1])
+
     def test_copy_logical_slots(self):
         self.cluster.config.data['slots']['ls']['database'] = 'b'
         self.s.copy_logical_slots(self.cluster, self.tags, ['ls'])

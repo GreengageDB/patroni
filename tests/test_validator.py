@@ -207,6 +207,15 @@ class TestValidator(unittest.TestCase):
         output = "\n".join(errors)
         self.assertEqual(['postgresql.bin_dir', 'raft.bind_addr', 'raft.self_addr'], parse_output(output))
 
+    def test_greengage(self, mock_out, mock_err):
+        c = copy.deepcopy(config)
+        c['greengage'] = {}
+        self.assertEqual(['postgresql.bin_dir', 'raft.bind_addr', 'raft.self_addr'],
+                         parse_output('\n'.join(schema(c))))
+        for value in (None, 1):
+            c['greengage'] = value
+            self.assertIn('greengage', parse_output('\n'.join(schema(c))))
+
     def test_bin_dir_is_file(self, mock_out, mock_err):
         files.append(config["postgresql"]["data_dir"])
         files.append(config["postgresql"]["bin_dir"])

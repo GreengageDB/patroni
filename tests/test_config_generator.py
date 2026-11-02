@@ -287,16 +287,19 @@ class TestGenerateConfig(unittest.TestCase):
                         'username': self.environ['PGUSER'],
                         'password': self.environ['PGPASSWORD'],
                         'gssencmode': None,
-                        'sslmode': None
+                        'sslmode': None,
+                        'options': '-c gp_role=utility'
                     },
                 },
             }
         }
         patch_config(self.config, conf)
 
+        # the libpq `options` come from PGOPTIONS, it isn't left in the environment for the other tests
         with patch('builtins.open', Mock(side_effect=self._get_running_instance_open_res())), \
              patch('sys.argv', ['patroni.py', '--generate-config']), \
              patch.object(MockConnect, 'server_version', PropertyMock(return_value=170000)), \
+             patch.dict(os.environ, {'PGOPTIONS': '-c gp_role=utility'}), \
              self.assertRaises(SystemExit) as e:
             _main()
         self.assertEqual(e.exception.code, 0)

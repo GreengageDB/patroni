@@ -531,7 +531,7 @@ class Ha(object):
             clone_member = self.get_remote_member(clone_member)
 
         self._rewind.reset_state()
-        if self.state_handler.bootstrap.clone(clone_member, clone_from_leader):
+        if self.state_handler.bootstrap.clone(clone_member, clone_from_leader, self.cluster.leader):
             logger.info('bootstrapped %s', msg)
             cluster = self.dcs.get_cluster()
             node_to_follow = self._get_node_to_follow(cluster)

@@ -297,6 +297,10 @@ class TestPostgresql(BaseTestPostgresql):
         with patch.object(MockCursor, 'execute', Mock(return_value=None)):
             self.assertIsNone(self.p.checkpoint())
         self.assertEqual(self.p.checkpoint(timeout=10), 'not accessible or not healthy')
+        # the options of the user are kept, statement_timeout is appended
+        with patch('patroni.postgresql.get_connection_cursor') as mock_get_cursor:
+            self.p.checkpoint({'user': 'postgres', 'options': '-c gp_role=utility'})
+            self.assertEqual(mock_get_cursor.call_args[1]['options'], '-c gp_role=utility -c statement_timeout=0')
 
     @patch('patroni.postgresql.config.mtime', mock_mtime)
     @patch('patroni.postgresql.config.ConfigHandler._get_pg_settings')
@@ -332,6 +336,13 @@ class TestPostgresql(BaseTestPostgresql):
                 mock_get_pg_settings.return_value['primary_slot_name'] = [
                     'primary_slot_name', '', '', 'string', 'postmaster', self.p.config._postgresql_conf]
                 self.assertEqual(self.p.config.check_recovery_conf(None), (True, True))
+
+    def test_primary_conninfo_params_without_options(self):
+        # `options` of the replication user can't be written to primary_conninfo, so they must not be expected there
+        self.p.config.replication['options'] = '-c gp_role=utility'
+        params = self.p.config.primary_conninfo_params(self.leader)
+        self.assertNotIn('options', params)
+        self.assertEqual(self.p.config.replication['options'], '-c gp_role=utility')
 
     @patch.object(Postgresql, 'major_version', PropertyMock(return_value=120000))
     @patch.object(Postgresql, 'is_running', MockPostmaster)
@@ -394,7 +405,13 @@ class TestPostgresql(BaseTestPostgresql):
     def test_follow(self):
         self.p.call_nowait(CallbackAction.ON_START)
         m = RemoteMember('1', {'restore_command': '2', 'primary_slot_name': 'foo', 'conn_kwargs': {'host': 'foo,bar'}})
-        self.p.follow(m)
+        with patch.object(self.p.mpp_handler, 'before_follow') as mock_before_follow:
+            self.p.follow(m)
+            mock_before_follow.assert_called_once_with(m)
+            # neither a reload nor the standby leader restarts postgres as a replica
+            self.p.follow(m, do_reload=True)
+            self.p.follow(m, role=PostgresqlRole.STANDBY_LEADER)
+            mock_before_follow.assert_called_once()
         with patch.object(Postgresql, 'ensure_major_version_is_known', Mock(return_value=False)):
             self.assertIsNone(self.p.follow(m))
 
@@ -964,6 +981,16 @@ class TestPostgresql(BaseTestPostgresql):
                               " pg_controldata value will be used. Setting 'Pending restart' flag",
                               'max_wal_senders', 10, 5))
 
+    def test_wal_keep_naming(self):
+        config = {'parameters': {'wal_keep_segments': 8, 'max_connections': 100, 'max_prepared_transactions': 0},
+                  'listen': '*:5432'}
+
+        with patch.object(Postgresql, 'major_version', PropertyMock(return_value=120000)):
+            # vanilla v12 has only wal_keep_segments
+            parameters = self.p.config.get_server_parameters(config)
+            self.assertEqual(parameters['wal_keep_segments'], 8)
+            self.assertNotIn('wal_keep_size', parameters)
+
     @patch('os.path.exists', Mock(return_value=True))
     @patch('os.path.isfile', Mock(return_value=False))
     def test_pgpass_is_dir(self):
@@ -1315,6 +1342,26 @@ class TestPostgresql2(BaseTestPostgresql):
         self.assertEqual(self.p.config.format_dsn(params),
                          'host=1 port=2 sslpassword=pwd sslcrldir=/ gssencmode=prefer channel_binding=prefer '
                          'target_session_attrs=read-write sslnegotiation=postgres')
+
+
+@patch('subprocess.call', Mock(return_value=0))
+@patch('patroni.psycopg.connect', psycopg_connect)
+class TestPostgresqlFork(BaseTestPostgresql):
+    """Postgres fork that is based on v12, but provides ``wal_keep_size``, which upstream introduced in v13."""
+
+    @patch('patroni.postgresql.CallbackExecutor', Mock())
+    @patch('subprocess.check_output', Mock(return_value=b'max_connections\nwal_keep_size'))
+    @patch.object(Postgresql, 'get_major_version', Mock(return_value=120000))
+    def setUp(self):
+        # the list of available GUCs is required already when the ConfigHandler object is created
+        super(TestPostgresqlFork, self).setUp()
+
+    def test_wal_keep_size(self):
+        config = {'parameters': {'wal_keep_segments': 8, 'max_connections': 100, 'max_prepared_transactions': 0},
+                  'listen': '*:5432'}
+        parameters = self.p.config.get_server_parameters(config)
+        self.assertEqual(parameters['wal_keep_size'], '128MB')
+        self.assertNotIn('wal_keep_segments', parameters)
 
 
 class TestPostgresqlStateMetrics(unittest.TestCase):

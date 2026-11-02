@@ -36,7 +36,8 @@ _AUTH_ALLOWED_PARAMETERS = (
     'sslcrldir',
     'gssencmode',
     'channel_binding',
-    'sslnegotiation'
+    'sslnegotiation',
+    'options'
 )
 
 ROLE_CONFIG_SUFFIX_MAP: Dict[PostgresqlRole, PostgresqlRole] = {

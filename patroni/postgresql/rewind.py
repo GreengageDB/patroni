@@ -15,8 +15,8 @@ from ..collections import EMPTY_DICT
 from ..dcs import Leader, RemoteMember
 from ..utils import process_user_options
 from . import Postgresql
-from .connection import get_connection_cursor
-from .misc import format_lsn, fsync_dir, parse_history, parse_lsn, PostgresqlRole
+from .connection import get_connection_cursor, remote_conn_kwargs
+from .misc import format_lsn, fsync_dir, merge_options, parse_history, parse_lsn, PostgresqlRole
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +232,7 @@ class Rewind(object):
         logger.info('primary: history=%s', '\n'.join(history_show))
 
     def _conn_kwargs(self, member: Union[Leader, RemoteMember], auth: Dict[str, Any]) -> Dict[str, Any]:
-        ret = member.conn_kwargs(auth)
+        ret = remote_conn_kwargs(member, auth)
         if not ret.get('dbname'):
             ret['dbname'] = self._postgresql.database
         # Add target_session_attrs to make sure we hit the primary.
@@ -481,7 +481,12 @@ class Rewind(object):
         user_options = process_user_options('rewind', options, not_allowed_options, logger.error)
         # prepare pg_rewind connection string
         env = self._postgresql.config.write_pgpass(conn_kwargs)
-        env.update(LANG='C', LC_ALL='C', PGOPTIONS='-c statement_timeout=0')
+        # pg_rewind connects to the source server on its own and the connection string we build below can't
+        # carry libpq `options`, therefore they are passed to the child process via the environment. Greengage,
+        # for example, requires `gp_role=utility` for connections to the coordinator. Disable statement_timeout
+        # last so that user options can't impose a timeout on rewind, including its connection initialization.
+        env.update(LANG='C', LC_ALL='C',
+                   PGOPTIONS=merge_options(conn_kwargs.get('options'), '-c statement_timeout=0'))
         dsn = self._postgresql.config.format_dsn({**conn_kwargs, 'password': None})
         logger.info('running pg_rewind from %s', dsn)
 
@@ -560,6 +565,9 @@ class Rewind(object):
             return logger.info('Waiting for checkpoint on %s before rewind', leader.name)
         elif not self.check_leader_is_not_in_recovery(r):
             return
+
+        if not self._postgresql.mpp_handler.before_rewind(leader):
+            return logger.warning('Deferring pg_rewind from %s: MPP preparation failed', leader.name)
 
         if self.pg_rewind(r):
             self._maybe_clean_pg_replslot()

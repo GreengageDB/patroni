@@ -5,9 +5,9 @@ supported MPP cluster. However, we may consider adapting other databases such as
 """
 import abc
 
-from typing import Any, Dict, Iterator, Optional, Tuple, Type, TYPE_CHECKING, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Type, TYPE_CHECKING, Union
 
-from ...dcs import Cluster
+from ...dcs import Cluster, Leader, Member
 from ...dynamic_loader import iter_classes
 from ...exceptions import PatroniException
 
@@ -53,6 +53,20 @@ class AbstractMPP(abc.ABC):
         :param config: configuration of MPP section.
 
         :returns: ``True`` is config passes validation, otherwise ``False``.
+        """
+
+    @staticmethod
+    def check_config(config: Union['Config', Dict[str, Any]]) -> None:
+        """Check whether the rest of the Patroni configuration is good for a given MPP.
+
+        .. note::
+            Unlike :meth:`validate_config`, gets the whole configuration, not only the MPP section, and is called
+            only if the MPP section passed :meth:`validate_config`. Does nothing by default.
+
+        :param config: object or dictionary with Patroni configuration.
+
+        :raises:
+            :exc:`~patroni.exceptions.ConfigParseError`: if the configuration is not suitable for the MPP.
         """
 
     @property
@@ -178,6 +192,58 @@ class AbstractMPPHandler(AbstractMPP):
 
         :param parameters: dictionary of GUCs, with key as GUC name and the corresponding value as current GUC value.
         """
+
+    def replication_application_name(self) -> str:
+        """Return the application name used by the streaming replication connection.
+
+        :returns: the Patroni member name by default.
+        """
+        return self._postgresql.name
+
+    def cmdline_options(self) -> List[str]:
+        """Additional command line options for the ``postgres`` process.
+
+        .. note::
+            Some GUCs can't be passed through ``postgresql.conf``, for example because the MPP database rejects the
+            value when it comes from a file. Such GUCs have to be set on the command line, like ``gp_role`` in
+            Greengage. Values returned from here are used only when Patroni starts postgres, they are not written
+            to ``postgresql.conf`` and are not compared with ``pg_settings``.
+
+        :returns: list of command line options, e.g. ``['--gp_role=dispatch']``. Empty list by default.
+        """
+        return []
+
+    def before_rewind(self, leader: Union[Leader, Member]) -> bool:
+        """Prepare the stopped target before running ``pg_rewind`` against *leader*.
+
+        :param leader: the source member, after its promotion and checkpoint have been checked.
+
+        :returns: ``True`` if rewind may proceed, ``False`` to defer it and retry later.
+        """
+        return True
+
+    def before_follow(self, leader: Union[Leader, Member]) -> None:
+        """Is called before postgres is started or restarted as a replica of the *leader*.
+
+        .. note::
+            The MPP database may keep its own registry of the nodes, which has to be updated before postgres is
+            started, e.g. Greengage reads the ``gp_dbid`` of the node only on start.
+
+        :param leader: the member postgres is going to replicate from.
+        """
+
+    def basebackup_options(self, leader: Optional[Leader]) -> Optional[List[str]]:
+        """Additional command line options for ``pg_basebackup``.
+
+        .. note::
+            The options returned from here can't be overridden with ``postgresql.basebackup``.
+
+        :param leader: the leader of the cluster, if known. The replica isn't necessarily cloned from it.
+
+        :returns: list of command line options, e.g. ``['--target-gp-dbid=9']``, empty list by default, or ``None``
+                  if ``pg_basebackup`` can't be used right now.
+        """
+        return []
 
     @abc.abstractmethod
     def ignore_replication_slot(self, slot: Dict[str, str]) -> bool:
@@ -313,5 +379,6 @@ def get_mpp(config: Union['Config', Dict[str, Any]]) -> AbstractMPP:
     """
     for name, mpp_class in iter_mpp_classes(config):
         if mpp_class.validate_config(config[name]):
+            mpp_class.check_config(config)
             return mpp_class(config[name])
     return Null()
